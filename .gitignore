@@ -1,0 +1,11 @@
+# Credenciales de Google (¡nunca subir al repo!)
+*.json
+
+# PDFs con rutinas (son archivos personales)
+*.pdf
+
+# Archivos temporales de Python
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
