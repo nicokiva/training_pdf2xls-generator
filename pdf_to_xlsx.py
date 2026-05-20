@@ -16,6 +16,7 @@ Estructura del proyecto:
         xlsx.py          ← escritura en archivo .xlsx local
 """
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -95,6 +96,12 @@ def main():
         service = get_sheets_service(args.credentials)
         write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=args.force)
         print(f"  Done! https://docs.google.com/spreadsheets/d/{args.sheets_id}")
+
+        # Disparar el análisis de nueva rutina automáticamente
+        analyzer = Path(__file__).parent.parent / "routine-analyzer" / "analyze.py"
+        if analyzer.exists():
+            print("\nRunning new-routine analysis...")
+            subprocess.run([sys.executable, str(analyzer), "--mode", "new-routine"], check=False)
 
     if not args.no_xlsx and not args.sheets_id:
         print("\nTip: use --sheets-id and --credentials to also sync to Google Sheets.")
