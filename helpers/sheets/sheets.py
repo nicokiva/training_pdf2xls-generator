@@ -1,17 +1,17 @@
 """
-helpers/sheets.py — Integración con Google Sheets.
+helpers/sheets.py — Google Sheets integration.
 
-Responsabilidades:
-    - Autenticar con la API de Google usando una Service Account
-    - Crear/borrar tabs en la planilla
-    - Escribir los datos en la grilla
-    - Aplicar todo el formato visual (bordes, colores, columnas, freeze)
+Responsibilities:
+    - Authenticate with the Google API using a Service Account
+    - Create/delete tabs in the spreadsheet
+    - Write data to the grid
+    - Apply all visual formatting (borders, colors, columns, freeze)
 """
 
 from helpers.exercise import exercise_display_name, day_exercise_layout
 
 
-# Permisos que pedimos a Google (leer y escribir planillas)
+# Permissions requested from Google (read and write spreadsheets)
 SHEETS_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -20,8 +20,8 @@ SHEETS_SCOPES = [
 
 def get_sheets_service(credentials_path):
     """
-    Crea y retorna el cliente autenticado de la API de Google Sheets.
-    Usa una Service Account (archivo JSON de credenciales).
+    Creates and returns the authenticated Google Sheets API client.
+    Uses a Service Account (JSON credentials file).
     """
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
@@ -33,14 +33,13 @@ def get_sheets_service(credentials_path):
 
 
 def sheets_tab_exists(service, spreadsheet_id, tab_name):
-    """Retorna True si ya existe un tab con ese nombre en la planilla."""
+    """Returns True if a tab with that name already exists in the spreadsheet."""
     meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-    # any() retorna True si al menos un elemento de la secuencia es verdadero
     return any(s["properties"]["title"] == tab_name for s in meta["sheets"])
 
 
 def get_sheet_id(service, spreadsheet_id, tab_name):
-    """Retorna el sheetId numérico interno de un tab (necesario para aplicar formato)."""
+    """Returns the internal numeric sheetId of a tab (needed to apply formatting)."""
     meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     for s in meta["sheets"]:
         if s["properties"]["title"] == tab_name:
@@ -50,61 +49,61 @@ def get_sheet_id(service, spreadsheet_id, tab_name):
 
 def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks=4, n_series=3):
     """
-    Aplica todo el formato visual al tab: bordes, colores de fondo, celdas combinadas,
-    ancho de columnas y columna fija.
+    Applies all visual formatting to the tab: borders, background colors, merged cells,
+    column widths and frozen column.
 
-    La API de Google Sheets funciona con "requests" (solicitudes de cambio) que se
-    acumulan en una lista y se envían todas juntas en un solo llamado a batchUpdate.
-    Esto es más eficiente que hacer un llamado por cada cambio.
+    The Google Sheets API works with "requests" (change requests) that are
+    accumulated in a list and sent all at once in a single batchUpdate call.
+    This is more efficient than making one call per change.
     """
-    # ── Estilos de borde ──────────────────────────────────────────────────────
-    THICK     = {"style": "SOLID_THICK", "colorStyle": {"rgbColor": {}}}   # borde grueso negro
-    THIN      = {"style": "SOLID",       "colorStyle": {"rgbColor": {}}}   # borde fino negro
+    # ── Border styles ─────────────────────────────────────────────────────────
+    THICK     = {"style": "SOLID_THICK", "colorStyle": {"rgbColor": {}}}   # thick black border
+    THIN      = {"style": "SOLID",       "colorStyle": {"rgbColor": {}}}   # thin black border
     NO_BORDER = {"style": "NONE"}
 
-    # ── Colores de fondo (RGB de 0.0 a 1.0, no de 0 a 255) ───────────────────
-    GREEN_BG = {"red": 0.851, "green": 0.918, "blue": 0.827}   # fila de números de serie
-    GRAY_BG  = {"red": 0.941, "green": 0.941, "blue": 0.941}   # fila Rep./Peso
-    PEACH_BG = {"red": 1.0,   "green": 0.949, "blue": 0.8}     # nombre de ejercicio combinado
-    WHITE_BG = {"red": 1.0,   "green": 1.0,   "blue": 1.0}     # nombre de ejercicio solo
+    # ── Background colors (RGB from 0.0 to 1.0, not 0 to 255) ────────────────
+    GREEN_BG = {"red": 0.851, "green": 0.918, "blue": 0.827}   # set number row
+    GRAY_BG  = {"red": 0.941, "green": 0.941, "blue": 0.941}   # Rep./Peso row
+    PEACH_BG = {"red": 1.0,   "green": 0.949, "blue": 0.8}     # combined exercise name
+    WHITE_BG = {"red": 1.0,   "green": 1.0,   "blue": 1.0}     # individual exercise name
 
-    # Colores muy suaves por semana para las celdas de datos
+    # Soft colors per week for data cells
     WEEK_COLORS = [
-        {"red": 0.94, "green": 0.99, "blue": 0.94},  # semana 1: verde muy suave
-        {"red": 0.93, "green": 0.96, "blue": 1.0},   # semana 2: azul muy suave
-        {"red": 0.97, "green": 0.94, "blue": 1.0},   # semana 3: lavanda muy suave
-        {"red": 1.0,  "green": 0.94, "blue": 0.93},  # semana 4: salmón muy suave
+        {"red": 0.94, "green": 0.99, "blue": 0.94},  # week 1: very soft green
+        {"red": 0.93, "green": 0.96, "blue": 1.0},   # week 2: very soft blue
+        {"red": 0.97, "green": 0.94, "blue": 1.0},   # week 3: very soft lavender
+        {"red": 1.0,  "green": 0.94, "blue": 0.93},  # week 4: very soft salmon
     ]
 
-    # Total de columnas: 1 (nombre) + 4 semanas × 3 series × 2 (Rep+Peso) = 25
+    # Total columns: 1 (name) + 4 weeks × 3 sets × 2 (Rep+Peso) = 25
     n_data_cols = n_weeks * n_series * 2
     total_cols  = 1 + n_data_cols
 
     def rng(r0, r1, c0, c1):
-        """Shortcut para construir un rango de celdas (filas r0..r1, columnas c0..c1)."""
+        """Shortcut to build a cell range (rows r0..r1, columns c0..c1)."""
         return {"sheetId": sheet_id, "startRowIndex": r0, "endRowIndex": r1,
                 "startColumnIndex": c0, "endColumnIndex": c1}
 
     def peso_right(w, s):
-        """Borde derecho de la celda Peso: grueso al final de cada semana, fino entre series."""
+        """Right border of the Peso cell: thick at end of each week, thin between sets."""
         return THICK if s == n_series - 1 else THIN
 
-    # ── Lista de requests de formato ──────────────────────────────────────────
-    # Empezamos con los cambios globales del sheet (columnas, freeze)
+    # ── List of formatting requests ───────────────────────────────────────────
+    # Start with global sheet changes (columns, freeze)
     requests = [
-        # Fijar ancho de columna A (nombres de ejercicios) en 180px
+        # Fix width of column A (exercise names) to 180px
         {"updateDimensionProperties": {
             "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
                       "startIndex": 0, "endIndex": 1},
             "properties": {"pixelSize": 180},
             "fields": "pixelSize",
         }},
-        # Congelar columna A: queda visible al scrollear horizontalmente
+        # Freeze column A: stays visible when scrolling horizontally
         {"updateSheetProperties": {
             "properties": {"sheetId": sheet_id, "gridProperties": {"frozenColumnCount": 1}},
             "fields": "gridProperties.frozenColumnCount",
         }},
-        # Fijar ancho de columnas de datos (B en adelante) en 45px
+        # Fix width of data columns (B onwards) to 45px
         {"updateDimensionProperties": {
             "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
                       "startIndex": 1, "endIndex": 25},
@@ -112,21 +111,21 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             "fields": "pixelSize",
         }},
     ]
-    current_row = 0   # fila actual (índice base 0, como usa la API de Google)
+    current_row = 0   # current row (0-based index, as used by the Google API)
 
     for day_num in days_data.keys():
         exercises = days_data[day_num]
         if not exercises:
             continue
 
-        # Índices de las filas de este día
-        dia_row    = current_row       # fila "Dia N"
-        series_row = current_row + 1  # fila de números de serie
-        label_row  = current_row + 2  # fila Rep./Peso
-        ex_start   = current_row + 3  # primera fila de ejercicios
+        # Row indices for this day
+        dia_row    = current_row       # "Dia N" row
+        series_row = current_row + 1  # set numbers row
+        label_row  = current_row + 2  # Rep./Peso row
+        ex_start   = current_row + 3  # first exercise row
 
-        # ── Fila "Dia N" ──────────────────────────────────────────────────────
-        # Celda A: negrita + bordes gruesos
+        # ── "Dia N" row ───────────────────────────────────────────────────────
+        # Cell A: bold + thick borders
         requests.append({"repeatCell": {
             "range": rng(dia_row, dia_row+1, 0, 1),
             "cell": {"userEnteredFormat": {
@@ -135,7 +134,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             }},
             "fields": "userEnteredFormat(textFormat,borders)",
         }})
-        # Celdas B:Y combinadas + bordes gruesos
+        # Cells B:Y merged + thick borders
         requests.append({"mergeCells": {
             "range": rng(dia_row, dia_row+1, 1, total_cols), "mergeType": "MERGE_ALL"
         }})
@@ -147,8 +146,8 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             "fields": "userEnteredFormat(borders)",
         }})
 
-        # ── Fila de números de serie ──────────────────────────────────────────
-        # Celda A combinada con la fila de etiquetas (ocupa 2 filas de alto)
+        # ── Set numbers row ───────────────────────────────────────────────────
+        # Cell A merged with label row (occupies 2 rows tall)
         requests.append({"mergeCells": {
             "range": rng(series_row, label_row+1, 0, 1), "mergeType": "MERGE_ALL"
         }})
@@ -163,7 +162,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
         for w in range(n_weeks):
             for s in range(n_series):
                 rb = peso_right(w, s)
-                # Combinar celda Rep+Peso para mostrar el número de serie centrado
+                # Merge Rep+Peso cell to show set number centered
                 requests.append({"mergeCells": {
                     "range": rng(series_row, series_row+1, col, col+2), "mergeType": "MERGE_ALL"
                 }})
@@ -178,7 +177,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 }})
                 col += 2
 
-        # ── Fila de etiquetas Rep./Peso ───────────────────────────────────────
+        # ── Rep./Peso label row ───────────────────────────────────────────────
         col = 1
         for w in range(n_weeks):
             for s in range(n_series):
@@ -203,10 +202,10 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 }})
                 col += 2
 
-        # ── Filas de ejercicios ───────────────────────────────────────────────
+        # ── Exercise rows ─────────────────────────────────────────────────────
         layout = day_exercise_layout(exercises)
 
-        # Encontrar el índice del ÚLTIMO ejercicio real (para ponerle borde grueso abajo)
+        # Find the index of the LAST real exercise (to put thick border at bottom)
         last_ex_layout_idx = max(i for i, (rt, _) in enumerate(layout) if rt != "blank")
 
         for layout_idx, (row_type, ex) in enumerate(layout):
@@ -215,18 +214,18 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 continue
 
             is_comb = (row_type == "comb")
-            # Fondo de la columna A: amarillo para combos, blanco para solos
+            # Background for column A: yellow for combos, white for solos
             bg      = PEACH_BG if is_comb else WHITE_BG
             is_last = (layout_idx == last_ex_layout_idx)
 
-            # Determinar si es el primer ejercicio de su tipo (para el borde superior)
+            # Determine if this is the first exercise in its group (for top border)
             prev_non_blank = next(
                 (layout[j] for j in range(layout_idx - 1, -1, -1) if layout[j][0] != "blank"),
                 None,
             )
             is_first_in_group = (prev_non_blank is None) or (prev_non_blank[0] != row_type)
 
-            # Borde de la celda de nombre (col A)
+            # Border for the name cell (col A)
             name_borders = {"left": THICK, "right": THIN}
             if is_comb:
                 if is_first_in_group:
@@ -238,28 +237,28 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 if is_last:
                     name_borders["bottom"] = THICK
 
-            # Formato de celda A: color de fondo + bordes + wrap de texto
+            # Format for cell A: background color + borders + text wrap
             requests.append({"repeatCell": {
                 "range": rng(cur, cur+1, 0, 1),
                 "cell": {"userEnteredFormat": {
                     "backgroundColor": bg,
                     "borders": name_borders,
-                    "wrapStrategy": "WRAP",   # texto largo baja a la siguiente línea
+                    "wrapStrategy": "WRAP",   # long text wraps to the next line
                 }},
                 "fields": "userEnteredFormat(backgroundColor,borders,wrapStrategy)",
             }})
 
-            # ── Celdas de datos (Rep + Peso por cada serie de cada semana) ──
+            # ── Data cells (Rep + Peso for each set of each week) ──
             col = 1
             for w in range(n_weeks):
-                week_bg = WEEK_COLORS[w]   # color suave de la semana (igual para solos y combos)
+                week_bg = WEEK_COLORS[w]   # soft week color (same for solos and combos)
                 for s in range(n_series):
                     rb = peso_right(w, s)
 
                     rep_borders  = {}
                     peso_borders = {"right": rb}
 
-                    # Borde superior: en el primer ejercicio del grupo (comb o solo)
+                    # Top border: on the first exercise in the group (comb or solo)
                     if is_comb and is_first_in_group:
                         rep_borders["top"]  = THIN
                         peso_borders["top"] = THIN
@@ -267,7 +266,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                         rep_borders["top"]  = THIN
                         peso_borders["top"] = THIN
 
-                    # Borde inferior grueso en el último ejercicio del día
+                    # Thick bottom border on the last exercise of the day
                     if is_last:
                         rep_borders["bottom"]  = THICK
                         peso_borders["bottom"] = THICK
@@ -288,10 +287,10 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                     }})
                     col += 2
 
-        # Avanzar current_row: 3 filas de encabezado + filas de ejercicios + 2 en blanco
+        # Advance current_row: 3 header rows + exercise rows + 2 blank rows
         current_row += 3 + len(layout) + 2
 
-    # Enviar todos los requests de formato en un solo llamado a la API
+    # Send all formatting requests in a single API call
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id,
         body={"requests": requests},
@@ -301,8 +300,8 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
 
 def build_sheet_values(days_data):
     """
-    Construye la grilla de datos (lista de listas) para escribir en Google Sheets.
-    Cada lista interna representa una fila; cada elemento, una celda.
+    Builds the data grid (list of lists) to write to Google Sheets.
+    Each inner list represents a row; each element, a cell.
     """
     all_rows = []
 
@@ -311,24 +310,24 @@ def build_sheet_values(days_data):
         if not exercises:
             continue
 
-        # Fila "Dia N"
+        # "Dia N" row
         all_rows.append([f"Dia {pos}"])
 
-        # Fila de números de serie
+        # Set numbers row
         series_row = [""]
         for _week in range(4):
             for s in range(1, 4):
                 series_row.extend([s, ""])
         all_rows.append(series_row)
 
-        # Fila de etiquetas
+        # Labels row
         label_row = [""]
         for _week in range(4):
             for _s in range(3):
                 label_row.extend(["Rep.", "Peso"])
         all_rows.append(label_row)
 
-        # Filas de ejercicios
+        # Exercise rows
         for row_type, ex in day_exercise_layout(exercises):
             if row_type == "blank":
                 all_rows.append([])
@@ -339,32 +338,32 @@ def build_sheet_values(days_data):
                 reps = week_reps[week_idx] if week_reps[week_idx] is not None else [None, None, None]
                 for s in range(3):
                     ex_row.append(reps[s] if s < len(reps) else "")
-                    ex_row.append("")   # columna Peso (vacía, se llena a mano)
+                    ex_row.append("")   # Peso column (filled in manually)
             all_rows.append(ex_row)
 
-        # Dos filas vacías entre días
+        # Two blank rows between days
         all_rows.append([])
         all_rows.append([])
 
-    # Reemplazar None por "" (la API de Sheets no acepta None)
+    # Replace None with "" (Sheets API does not accept None)
     return [[("" if v is None else v) for v in row] for row in all_rows]
 
 
 def write_to_google_sheets(service, spreadsheet_id, tab_name, days_data, force=False):
     """
-    Crea el tab en Google Sheets y escribe los datos con formato.
+    Creates the tab in Google Sheets and writes the data with formatting.
 
-    Si el tab ya existe:
-        - Con force=False: no hace nada (evita sobreescribir accidentalmente)
-        - Con force=True:  borra el tab existente y lo recrea desde cero
+    If the tab already exists:
+        - With force=False: does nothing (avoids accidental overwrite)
+        - With force=True:  deletes the existing tab and recreates it from scratch
     """
     sheets = service.spreadsheets()
 
     if sheets_tab_exists(service, spreadsheet_id, tab_name):
         if not force:
-            print(f"  Tab '{tab_name}' ya existe — no se hace nada.")
+            print(f"  Tab '{tab_name}' already exists — doing nothing.")
             return
-        # Borrar tab existente
+        # Delete existing tab
         existing_id = get_sheet_id(service, spreadsheet_id, tab_name)
         sheets.batchUpdate(
             spreadsheetId=spreadsheet_id,
@@ -372,7 +371,7 @@ def write_to_google_sheets(service, spreadsheet_id, tab_name, days_data, force=F
         ).execute()
         print(f"  Deleted existing tab '{tab_name}'")
 
-    # Crear nuevo tab al frente (index 0)
+    # Create new tab at the front (index 0)
     resp = sheets.batchUpdate(
         spreadsheetId=spreadsheet_id,
         body={"requests": [{"addSheet": {"properties": {"title": tab_name, "index": 0}}}]},
@@ -380,7 +379,7 @@ def write_to_google_sheets(service, spreadsheet_id, tab_name, days_data, force=F
     sheet_id = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
     print(f"  Created new tab '{tab_name}' at position 0")
 
-    # Escribir los valores en la grilla
+    # Write the values to the grid
     values = build_sheet_values(days_data)
     sheets.values().update(
         spreadsheetId=spreadsheet_id,
@@ -390,5 +389,5 @@ def write_to_google_sheets(service, spreadsheet_id, tab_name, days_data, force=F
     ).execute()
     print(f"  Written {len(values)} rows to '{tab_name}'")
 
-    # Aplicar formato visual
+    # Apply visual formatting
     apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data)

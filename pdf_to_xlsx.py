@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-pdf_to_xlsx.py — Punto de entrada del script.
+pdf_to_xlsx.py — Script entry point.
 
-Lee un PDF de rutinas de entrenamiento y escribe los datos en Google Sheets.
+Reads a training routine PDF and writes the data to Google Sheets.
 
-Uso:
+Usage:
     python3 pdf_to_xlsx.py <pdf.pdf> --sheets-id XXXX --credentials creds.json [--force] [--no-xlsx]
 
-Estructura del proyecto:
-    pdf_to_xlsx.py       ← este archivo (solo el CLI)
+Project structure:
+    pdf_to_xlsx.py       ← this file (CLI only)
     helpers/
-        pdf_parser.py    ← extracción de datos del PDF
-        exercise.py      ← utilidades de ejercicios (nombre, layout, tab name)
-        sheets.py        ← escritura y formato en Google Sheets
-        xlsx.py          ← escritura en archivo .xlsx local
+        pdf_parser.py    ← data extraction from PDF
+        exercise.py      ← exercise utilities (name, layout, tab name)
+        sheets.py        ← writing and formatting in Google Sheets
+        xlsx.py          ← writing to local .xlsx file
 """
 
 import subprocess
@@ -31,7 +31,6 @@ from helpers.xlsx       import write_xlsx_tab
 def main():
     import argparse
 
-    # argparse maneja los argumentos de línea de comandos automáticamente
     parser = argparse.ArgumentParser(
         description="Parse a training PDF and write it to Google Sheets."
     )
@@ -39,7 +38,7 @@ def main():
     parser.add_argument(
         "--xlsx",
         default=None,
-        help='Path to the XLSX workbook (default: "Rutinas entrenamiento.xlsx" next to the PDF)',
+        help='Path to the XLSX workbook (default: "Training Routines.xlsx" next to the PDF)',
     )
     parser.add_argument(
         "--sheets-id",
@@ -53,7 +52,7 @@ def main():
     )
     parser.add_argument(
         "--no-xlsx",
-        action="store_true",   # si está presente, args.no_xlsx = True
+        action="store_true",
         help="Skip writing to the local XLSX file",
     )
     parser.add_argument(
@@ -64,22 +63,22 @@ def main():
     args = parser.parse_args()
 
     pdf_path  = args.pdf
-    xlsx_path = args.xlsx or str(Path(pdf_path).parent / "Rutinas entrenamiento.xlsx")
+    xlsx_path = args.xlsx or str(Path(pdf_path).parent / "Training Routines.xlsx")
 
     print(f"Parsing PDF: {pdf_path}")
     data = parse_pdf(pdf_path)
 
-    # Mostrar resumen de lo que se parseó
-    print(f"  Vigencia: {data['vigencia_start']} - {data['vigencia_end']}")
+    # Display a summary of what was parsed
+    print(f"  Validity: {data['vigencia_start']} - {data['vigencia_end']}")
     for day_num, exercises in sorted(data["days"].items()):
-        print(f"  Dia {day_num}: {len(exercises)} ejercicios")
+        print(f"  Day {day_num}: {len(exercises)} exercises")
         for ex in exercises:
-            print(f"    #{ex['number']} {exercise_display_name(ex)} | semanas: {ex.get('week_reps')}")
+            print(f"    #{ex['number']} {exercise_display_name(ex)} | weeks: {ex.get('week_reps')}")
 
     tab_name = make_tab_name(data["vigencia_start"], data["vigencia_end"])
     print(f"\nTab name: {tab_name}")
 
-    # Escribir a archivo XLSX local (si no se pasó --no-xlsx)
+    # Write to local XLSX file (unless --no-xlsx was passed)
     if not args.no_xlsx:
         print(f"\nUpdating XLSX: {xlsx_path}")
         wb = openpyxl.load_workbook(xlsx_path)
@@ -87,7 +86,7 @@ def main():
         wb.save(xlsx_path)
         print(f"  Saved: {xlsx_path}")
 
-    # Escribir a Google Sheets (si se pasó --sheets-id)
+    # Write to Google Sheets (if --sheets-id was passed)
     if args.sheets_id:
         if not args.credentials:
             print("\nError: --credentials is required when using --sheets-id")
@@ -95,7 +94,7 @@ def main():
 
         analyzer = Path(__file__).parent.parent / "routine-analyzer" / "analyze.py"
 
-        # Pre-upload: analizar el historial existente antes de agregar la nueva rutina
+        # Pre-upload: analyze existing history before adding the new routine
         if analyzer.exists():
             print("\nRunning pre-upload analysis (global + monthly)...")
             subprocess.run([sys.executable, str(analyzer), "--mode", "global"],  check=False)
@@ -106,7 +105,7 @@ def main():
         write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=args.force)
         print(f"  Done! https://docs.google.com/spreadsheets/d/{args.sheets_id}")
 
-        # Post-upload: analizar la nueva rutina ya cargada en el sheet
+        # Post-upload: analyze the new routine already loaded in the sheet
         if analyzer.exists():
             print("\nRunning post-upload analysis (new-routine)...")
             subprocess.run([sys.executable, str(analyzer), "--mode", "new-routine"], check=False)
@@ -115,7 +114,7 @@ def main():
         print("\nTip: use --sheets-id and --credentials to also sync to Google Sheets.")
 
 
-# Este bloque solo se ejecuta cuando corrés el script directamente con python3.
-# Si otro archivo importa este módulo, este bloque NO se ejecuta.
+# This block only runs when you execute the script directly with python3.
+# If another file imports this module, this block does NOT run.
 if __name__ == "__main__":
     main()

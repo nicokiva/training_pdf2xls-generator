@@ -1,60 +1,60 @@
 """
-helpers/pdf_parser.py — Lógica de extracción de datos del PDF.
+helpers/pdf_parser.py — PDF data extraction logic.
 
-Responsabilidades:
-    - Leer el archivo PDF con pdfplumber
-    - Detectar días, ejercicios, repeticiones semanales y comentarios
-    - Retornar los datos en una estructura de Python (dicts y listas)
+Responsibilities:
+    - Read the PDF file with pdfplumber
+    - Detect days, exercises, weekly repetitions and comments
+    - Return the data in a Python structure (dicts and lists)
 """
 
 import re
 import pdfplumber
 
 
-# ── Constantes de posición en el PDF ─────────────────────────────────────────
-# pdfplumber mide las coordenadas en puntos desde la esquina superior izquierda.
+# ── PDF position constants ────────────────────────────────────────────────────
+# pdfplumber measures coordinates in points from the top-left corner.
 
-# Coordenada X que divide el PDF en columna izquierda y columna derecha
+# X coordinate that divides the PDF into left and right columns
 COL_SPLIT_X = 290
 
-# Rango de coordenadas X donde aparecen los números de ejercicio.
-# Son tuplas: (x_mínima, x_máxima)
+# X coordinate ranges where exercise numbers appear.
+# Tuples: (x_minimum, x_maximum)
 LEFT_EX_NUM_X_RANGE  = (55, 80)
 RIGHT_EX_NUM_X_RANGE = (345, 370)
 
-# Coordenada Y mínima para ignorar el encabezado del PDF (logo, título, etc.)
+# Minimum Y coordinate to skip the PDF header (logo, title, etc.)
 HEADER_BOTTOM_Y = 230
 
 
 def group_lines(words, y_tolerance=4):
     """
-    Agrupa palabras en líneas según su posición vertical (coordenada Y).
+    Groups words into lines based on their vertical position (Y coordinate).
 
-    pdfplumber extrae cada palabra con su posición exacta. Dos palabras en la
-    misma línea pueden tener Y levemente diferente (ej: 100.1 vs 100.4), así
-    que usamos una tolerancia de 4 puntos para agruparlas.
+    pdfplumber extracts each word with its exact position. Two words on the
+    same line may have slightly different Y values (e.g. 100.1 vs 100.4), so
+    we use a tolerance of 4 points to group them.
 
-    Parámetros:
-        words       — lista de dicts con claves 'text', 'x0', 'top', etc.
-        y_tolerance — cuántos puntos de diferencia en Y se consideran "misma línea"
+    Parameters:
+        words       — list of dicts with keys 'text', 'x0', 'top', etc.
+        y_tolerance — how many points of Y difference are considered "same line"
 
-    Retorna: lista de líneas, donde cada línea es una lista de palabras ordenadas de izq a der.
+    Returns: list of lines, where each line is a list of words ordered left to right.
     """
     if not words:
         return []
 
-    # Ordenamos las palabras: primero por Y redondeado (para agrupar), luego por X
+    # Sort words: first by rounded Y (to group), then by X
     words = sorted(words, key=lambda w: (round(w["top"] / y_tolerance) * y_tolerance, w["x0"]))
 
     lines = []
     current_line = [words[0]]
 
-    # Recorremos cada palabra y la sumamos a la línea actual o abrimos una nueva
+    # Iterate through each word and add it to the current line or start a new one
     for word in words[1:]:
         if abs(word["top"] - current_line[0]["top"]) <= y_tolerance:
             current_line.append(word)
         else:
-            # Nueva línea: guardamos la anterior ordenada por X
+            # New line: save the previous one sorted by X
             lines.append(sorted(current_line, key=lambda w: w["x0"]))
             current_line = [word]
 
@@ -63,20 +63,19 @@ def group_lines(words, y_tolerance=4):
 
 
 def line_text(line):
-    """Une las palabras de una línea en un string con espacios."""
-    # Esto es un "generator expression": itera sobre `line` y toma el texto de cada palabra
+    """Joins the words of a line into a space-separated string."""
     return " ".join(w["text"] for w in line)
 
 
 def is_exercise_number(word, col):
     """
-    Determina si una palabra es el número de un ejercicio.
+    Determines if a word is an exercise number.
 
-    Los PDFs tienen números de ejercicio en posiciones X específicas.
-    Esta función verifica que:
-      1. El texto sea un dígito
-      2. Esté en el rango 1-20
-      3. Esté en la zona X correcta para la columna ('left' o 'right')
+    PDFs have exercise numbers at specific X positions.
+    This function verifies that:
+      1. The text is a digit
+      2. It is in the range 1-20
+      3. It is in the correct X zone for the column ('left' or 'right')
     """
     if not word["text"].isdigit():
         return False
@@ -92,17 +91,17 @@ def is_exercise_number(word, col):
 
 def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTOM_Y):
     """
-    Parsea los ejercicios de UNA columna horizontal del PDF.
+    Parses the exercises from ONE horizontal column of the PDF.
 
-    El PDF tiene dos columnas de ejercicios (izquierda y derecha).
-    Esta función filtra las palabras que caen dentro de [x_min, x_max]
-    y construye una lista de ejercicios con sus repeticiones semanales.
+    The PDF has two exercise columns (left and right).
+    This function filters the words that fall within [x_min, x_max]
+    and builds a list of exercises with their weekly repetitions.
 
-    Retorna una tupla:
-        exercises   — lista de dicts: {number, name, is_comb, week_reps}
-        comb_groups — lista de [primer_numero, cantidad] para re-aplicar combos cross-column
+    Returns a tuple:
+        exercises   — list of dicts: {number, name, is_comb, week_reps}
+        comb_groups — list of [first_number, count] to re-apply combos cross-column
     """
-    # Filtramos solo las palabras que caen en esta columna y por debajo del header
+    # Filter only words that fall in this column and below the header
     words = [w for w in all_words if x_min <= w["x0"] < x_max and w["top"] > header_bottom_y]
     if not words:
         return [], []
@@ -110,19 +109,19 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
     lines = group_lines(words)
 
     exercises          = []
-    current_ex         = None     # ejercicio que estamos construyendo ahora mismo
-    pending_name_parts = []       # fragmentos de nombre vistos ANTES del número de ejercicio
-    week_reps          = [None, None, None, None]   # repeticiones de las 4 semanas
-    comb_count         = 0        # cuántos ejercicios tiene el Comb actual
-    comb_assigned      = 0        # cuántos del Comb ya marcamos
-    comb_groups        = []       # para re-aplicar combos cross-column después
-    current_comb_start = None     # número del primer ejercicio del Comb actual
+    current_ex         = None     # exercise currently being built
+    pending_name_parts = []       # name fragments seen BEFORE the exercise number
+    week_reps          = [None, None, None, None]   # repetitions for 4 weeks
+    comb_count         = 0        # how many exercises the current Comb has
+    comb_assigned      = 0        # how many of the Comb have been marked
+    comb_groups        = []       # to re-apply combos cross-column later
+    current_comb_start = None     # number of the first exercise in the current Comb
 
     def save_exercise():
         """
-        Guarda el ejercicio actual en la lista y resetea el estado.
-        Es una función anidada (closure): puede acceder y modificar las
-        variables del scope externo usando 'nonlocal'.
+        Saves the current exercise to the list and resets the state.
+        Nested function (closure): can access and modify outer scope
+        variables using 'nonlocal'.
         """
         nonlocal current_ex, pending_name_parts, week_reps
         if current_ex is not None:
@@ -135,62 +134,62 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
     for line in lines:
         txt = line_text(line)
 
-        # Ignorar líneas de encabezado de series y pesos
+        # Ignore set and weight header lines
         if re.match(r"^Series\s+\d", txt) or re.match(r"^kg\b", txt):
             continue
 
-        # Detectar "Comb xN" — indica que los próximos N ejercicios son combinados
+        # Detect "Comb xN" — indicates the next N exercises are combined
         m_comb = re.match(r"^Comb\s+x(\d+)", txt, re.IGNORECASE)
         if m_comb:
-            comb_count = int(m_comb.group(1))   # group(1) = lo que capturó el paréntesis (\d+)
+            comb_count = int(m_comb.group(1))
             comb_assigned = 0
             current_comb_start = None
             continue
 
-        # Detectar "repeticiones X X X" → repeticiones de la semana 1 (3 series)
+        # Detect "repeticiones X X X" → week 1 repetitions (3 sets)
         m = re.match(r"^repeticiones\s+(\d+)\s+(\d+)\s+(\d+)", txt)
         if m and current_ex is not None:
             week_reps[0] = [int(m.group(1)), int(m.group(2)), int(m.group(3))]
             continue
 
-        # Detectar progresión semanal: "2da X", "3ra X", "4ta X"
-        # Usamos re.search (no re.match) para encontrar el patrón en cualquier parte de la línea,
-        # así capturamos también líneas como "MANOS ATRAS DE LA NUCA 2da 6" o "2da 8 CADA PIERNA"
+        # Detect weekly progression: "2da X", "3ra X", "4ta X"
+        # Use re.search (not re.match) to find the pattern anywhere in the line,
+        # capturing lines like "HANDS BEHIND NECK 2da 6" or "2da 8 EACH LEG"
         m2 = re.search(r"(2da|3ra|4ta)\s+(\d+)", txt)
         if m2 and current_ex is not None:
             week_idx = {"2da": 1, "3ra": 2, "4ta": 3}[m2.group(1)]
             rep = int(m2.group(2))
             if week_reps[0] is not None:
-                week_reps[week_idx] = [rep, rep, rep]   # mismas reps para las 3 series
+                week_reps[week_idx] = [rep, rep, rep]   # same reps for all 3 sets
 
-            # Extraer comentario: texto antes o después del token "2da X"
+            # Extract comment: text before or after the "2da X" token
             before = txt[:m2.start()].strip()
             after  = txt[m2.end():].strip()
-            # Ignorar sugerencias de carga como "con mas peso"
+            # Ignore load suggestions like "con mas peso"
             after = re.sub(r"con\s+mas\s+peso.*", "", after, flags=re.IGNORECASE).strip()
             comment = (before or after).strip()
             if comment and not re.match(r"^[\d\s]+$", comment):
-                # setdefault: solo guarda si NO hay ya un comentario (no sobreescribe)
+                # setdefault: only saves if there is NOT already a comment (doesn't overwrite)
                 current_ex.setdefault("comment", comment)
             continue
 
-        # Verificar si alguna palabra de esta línea es un número de ejercicio
-        # next(..., None) retorna el primer elemento que cumpla la condición, o None si no hay ninguno
+        # Check if any word in this line is an exercise number
+        # next(..., None) returns the first element matching the condition, or None if none
         ex_num_word = next((w for w in line if is_exercise_number(w, col_side)), None)
 
         if ex_num_word is not None:
-            # Capturamos el nombre pendiente ANTES de guardar (save_exercise lo borra)
+            # Capture the pending name BEFORE saving (save_exercise clears it)
             name_from_above = " ".join(pending_name_parts).strip()
 
-            save_exercise()   # guardamos el ejercicio anterior si había uno
+            save_exercise()   # save the previous exercise if there was one
 
             num = int(ex_num_word["text"])
 
-            # Nombre del ejercicio = palabras a la derecha del número en la misma línea
+            # Exercise name = words to the right of the number on the same line
             name_words  = [w["text"] for w in line if w["x0"] > ex_num_word["x0"]]
             name_inline = " ".join(name_words).strip()
 
-            # Combinamos nombre de arriba (pending) con el de la línea del número
+            # Combine name from above (pending) with the name from the number line
             if name_inline and name_from_above:
                 name = name_from_above + " " + name_inline
             elif name_inline:
@@ -198,19 +197,19 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
             else:
                 name = name_from_above
 
-            # Creamos el dict del ejercicio
+            # Create the exercise dict
             current_ex = {"number": num, "name": name.strip(), "is_comb": False}
 
-            # Marcar como combinado si estamos dentro de un bloque Comb
+            # Mark as combined if we are inside a Comb block
             if comb_count > 0 and comb_assigned < comb_count:
                 current_ex["is_comb"] = True
                 if current_comb_start is None:
-                    # Registramos el inicio del grupo para poder re-aplicarlo cross-column
+                    # Register the group start to re-apply it cross-column
                     current_comb_start = num
                     comb_groups.append([num, comb_count])
                 comb_assigned += 1
                 if comb_assigned >= comb_count:
-                    # Terminó el grupo Comb, reseteamos contadores
+                    # Comb group finished, reset counters
                     comb_count = 0
                     comb_assigned = 0
                     current_comb_start = None
@@ -219,55 +218,55 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
             week_reps = [None, None, None, None]
             continue
 
-        # Línea sin número de ejercicio: puede ser un fragmento de nombre o un comentario
+        # Line without an exercise number: may be a name fragment or a comment
         if txt and not re.match(r"^[\d\s]+$", txt):
             skip_patterns = r"^(repeticiones|Series|kg|2da|3ra|4ta|\d+(\.\d+)?[\s\|]*)+$"
             if not re.match(skip_patterns, txt):
                 all_weeks_done = all(week_reps[i] is not None for i in range(4))
                 if current_ex is None or all_weeks_done:
-                    # Nombre que aparece ANTES del número del ejercicio siguiente
+                    # Name that appears BEFORE the next exercise's number
                     pending_name_parts.append(txt)
                 elif week_reps[0] is None:
-                    # Continuación del nombre, antes de "repeticiones"
+                    # Name continuation, before "repeticiones"
                     current_ex["name"] = (current_ex["name"] + " " + txt).strip()
                 else:
-                    # Texto después de "repeticiones" que no es progresión → es un comentario
-                    # (ej: "MANOS ATRAS DE LA NUCA" en una línea separada)
+                    # Text after "repeticiones" that is not a progression → it's a comment
+                    # (e.g. "HANDS BEHIND THE NECK" on a separate line)
                     current_ex.setdefault("comment", txt)
 
-    save_exercise()   # guardamos el último ejercicio de la columna
+    save_exercise()   # save the last exercise in the column
     return exercises, comb_groups
 
 
 def parse_pdf(pdf_path):
     """
-    Lee el PDF completo y retorna los datos estructurados de todos los días.
+    Reads the full PDF and returns the structured data for all days.
 
-    Retorna un dict con:
-        'vigencia_start' — fecha inicio (str "DD/MM/YYYY")
-        'vigencia_end'   — fecha fin
-        'days'           — dict {número_día: [lista de ejercicios]}
+    Returns a dict with:
+        'vigencia_start' — start date (str "DD/MM/YYYY")
+        'vigencia_end'   — end date
+        'days'           — dict {day_number: [list of exercises]}
 
-    Nota: el primer grupo Comb del PDF (ejercicios universales como abdominales)
-    se propaga automáticamente a TODOS los días.
+    Note: the first Comb group in the PDF (universal exercises like abs)
+    is automatically propagated to ALL days.
     """
     result = {"vigencia_start": None, "vigencia_end": None, "days": {}}
-    first_pdf_day = None   # día de la primera página del PDF (para saber cuál es el Comb universal)
+    first_pdf_day = None   # day from the first PDF page (to identify the universal Comb)
 
-    # Abrimos el PDF con pdfplumber (el 'with' garantiza que se cierre al terminar)
+    # Open the PDF with pdfplumber ('with' ensures it is closed when done)
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            words = page.extract_words()         # lista de dicts con cada palabra y su posición
-            text  = page.extract_text() or ""    # texto plano de la página
+            words = page.extract_words()         # list of dicts with each word and its position
+            text  = page.extract_text() or ""    # plain text of the page
 
-            # Extraer "Vigencia: DD/MM/YYYY - DD/MM/YYYY" de la primera página
+            # Extract "Vigencia: DD/MM/YYYY - DD/MM/YYYY" from the first page
             if result["vigencia_start"] is None:
                 m = re.search(r"Vigencia:\s*(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})", text)
                 if m:
                     result["vigencia_start"] = m.group(1)
                     result["vigencia_end"]   = m.group(2)
 
-            # Detectar el número de día: dígito centrado en X≈294, Y≈218
+            # Detect the day number: digit centered at X≈294, Y≈218
             day_num = None
             for w in words:
                 if (w["text"].isdigit() and 1 <= int(w["text"]) <= 10
@@ -276,41 +275,41 @@ def parse_pdf(pdf_path):
                     break
 
             if day_num is None:
-                # Página de continuación (sin encabezado de día) → la sumamos al último día
+                # Continuation page (no day header) → add to the last day
                 if result["days"]:
                     last_day = max(result["days"].keys())
                     day_num = last_day
                 else:
                     continue
-                effective_header_bottom = 50   # las páginas de continuación no tienen header grande
+                effective_header_bottom = 50   # continuation pages don't have a large header
             else:
                 effective_header_bottom = HEADER_BOTTOM_Y
                 if first_pdf_day is None:
                     first_pdf_day = day_num
 
-            # Parsear columna izquierda y derecha por separado
+            # Parse left and right columns separately
             left_ex,  left_comb_groups  = parse_column(words, 0, COL_SPLIT_X, "left",  effective_header_bottom)
             right_ex, right_comb_groups = parse_column(words, COL_SPLIT_X, 9999, "right", effective_header_bottom)
 
-            # Unimos ambas columnas ordenando por número de ejercicio
+            # Merge both columns sorted by exercise number
             all_ex = sorted(left_ex + right_ex, key=lambda e: e["number"])
 
-            # Re-aplicar membresía de Comb globalmente.
-            # Problema: parse_column marca combos dentro de su propia columna.
-            # Si un Comb tiene ejercicios en ambas columnas (ej: 1 izq, 2 der, 3 izq),
-            # la columna derecha no sabe que el ejercicio 2 es parte del Comb.
-            # Solución: usamos los comb_groups (inicio + cantidad) para marcar
-            # los ejercicios correctos en la lista combinada de ambas columnas.
+            # Re-apply Comb membership globally.
+            # Problem: parse_column marks combos within its own column.
+            # If a Comb has exercises in both columns (e.g. 1 left, 2 right, 3 left),
+            # the right column doesn't know that exercise 2 is part of the Comb.
+            # Solution: use comb_groups (start + count) to mark the correct
+            # exercises in the combined list from both columns.
             all_comb_groups = left_comb_groups + right_comb_groups
             if all_comb_groups:
                 for ex in all_ex:
-                    ex["is_comb"] = False   # reseteamos primero
+                    ex["is_comb"] = False   # reset first
                 all_numbers = [ex["number"] for ex in all_ex]
                 for start_num, count in all_comb_groups:
                     if start_num not in all_numbers:
                         continue
                     start_idx = all_numbers.index(start_num)
-                    # Marcamos 'count' ejercicios consecutivos a partir del inicio
+                    # Mark 'count' consecutive exercises starting from the beginning
                     for i in range(start_idx, min(start_idx + count, len(all_ex))):
                         all_ex[i]["is_comb"] = True
 
@@ -318,17 +317,17 @@ def parse_pdf(pdf_path):
                 result["days"][day_num] = []
             result["days"][day_num].extend(all_ex)
 
-    # ── Propagar los ejercicios universales (Comb del primer día) a todos los días ──
-    # Los abdominales y similares aparecen solo en la primera página del PDF
-    # pero deben estar en todos los días.
+    # ── Propagate universal exercises (Comb from the first day) to all days ──
+    # Abs and similar exercises appear only on the first PDF page
+    # but must be present in all days.
     if first_pdf_day and first_pdf_day in result["days"]:
         universal_comb = [ex for ex in result["days"][first_pdf_day] if ex.get("is_comb")]
         if universal_comb:
             for day_num, exercises in result["days"].items():
                 if day_num == first_pdf_day:
-                    continue   # el primer día ya los tiene
+                    continue   # first day already has them
                 if not exercises or not exercises[0].get("is_comb"):
-                    # dict(ex) crea una copia independiente del dict (no una referencia)
+                    # dict(ex) creates an independent copy of the dict (not a reference)
                     prepend = [dict(ex) for ex in universal_comb]
                     result["days"][day_num] = prepend + exercises
 

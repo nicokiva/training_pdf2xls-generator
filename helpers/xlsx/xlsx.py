@@ -1,8 +1,8 @@
 """
-helpers/xlsx.py — Escritura de datos al archivo .xlsx local.
+helpers/xlsx.py — Writing data to the local .xlsx file.
 
-Responsabilidades:
-    - Crear o reemplazar un tab en el workbook con los datos de entrenamiento
+Responsibilities:
+    - Create or replace a tab in the workbook with the training data
 """
 
 import openpyxl
@@ -11,19 +11,19 @@ from helpers.exercise import exercise_display_name, day_exercise_layout
 
 def write_xlsx_tab(wb, tab_name, days_data):
     """
-    Crea o reemplaza un tab en el workbook .xlsx con los datos de entrenamiento.
-    Estructura: encabezado de día → fila de series → fila Rep./Peso → filas de ejercicios.
+    Creates or replaces a tab in the .xlsx workbook with the training data.
+    Structure: day header → set row → Rep./Peso row → exercise rows.
 
-    Parámetros:
-        wb        — workbook de openpyxl (el archivo .xlsx abierto)
-        tab_name  — nombre del tab a crear (ej: "25-05-26-...")
-        days_data — dict {día: [ejercicios]} tal como lo retorna parse_pdf
+    Parameters:
+        wb        — openpyxl workbook (the open .xlsx file)
+        tab_name  — name of the tab to create (e.g. "25-05-26-...")
+        days_data — dict {day: [exercises]} as returned by parse_pdf
     """
-    # Los nombres de hojas en XLSX no pueden contener "/"
+    # Sheet names in XLSX cannot contain "/"
     xlsx_tab_name = tab_name.replace("/", "-")
     if xlsx_tab_name in wb.sheetnames:
-        del wb[xlsx_tab_name]   # borramos si ya existe
-    ws = wb.create_sheet(xlsx_tab_name, 0)   # 0 = insertamos al frente
+        del wb[xlsx_tab_name]   # delete if already exists
+    ws = wb.create_sheet(xlsx_tab_name, 0)   # 0 = insert at the front
 
     row = 1
     for pos, day_num in enumerate(days_data.keys(), start=1):
@@ -31,20 +31,20 @@ def write_xlsx_tab(wb, tab_name, days_data):
         if not exercises:
             continue
 
-        # Fila "Dia N" — usamos posición (pos) no el número del PDF
+        # "Dia N" row — use position (pos) not the PDF number
         ws.cell(row=row, column=1, value=f"Dia {pos}")
         row += 1
 
-        # Fila de números de serie: [None, 1, None, 2, None, 3, None, ...] (4 semanas × 3 series)
+        # Set numbers row: [None, 1, None, 2, None, 3, None, ...] (4 weeks × 3 sets)
         series_row = [None]
         for _week in range(4):
             for s in range(1, 4):
-                series_row.extend([s, None])   # s = número de serie, None = col Peso vacía
+                series_row.extend([s, None])   # s = set number, None = empty Peso col
         for col_idx, val in enumerate(series_row, start=1):
             ws.cell(row=row, column=col_idx, value=val)
         row += 1
 
-        # Fila de etiquetas Rep./Peso
+        # Rep./Peso labels row
         label_row = [None]
         for _week in range(4):
             for _s in range(3):
@@ -53,7 +53,7 @@ def write_xlsx_tab(wb, tab_name, days_data):
             ws.cell(row=row, column=col_idx, value=val)
         row += 1
 
-        # Una fila por ejercicio
+        # One row per exercise
         for row_type, ex in day_exercise_layout(exercises):
             if row_type == "blank":
                 row += 1
@@ -64,11 +64,11 @@ def write_xlsx_tab(wb, tab_name, days_data):
                 reps = week_reps[week_idx] if week_reps[week_idx] is not None else [None, None, None]
                 for s in range(3):
                     ex_row.append(reps[s] if s < len(reps) else None)
-                    ex_row.append(None)   # columna Peso (se llena a mano)
+                    ex_row.append(None)   # Peso column (filled in manually)
             for col_idx, val in enumerate(ex_row, start=1):
                 ws.cell(row=row, column=col_idx, value=val)
             row += 1
 
-        row += 2   # dos filas en blanco entre días
+        row += 2   # two blank rows between days
 
     return ws
