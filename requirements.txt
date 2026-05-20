@@ -1,2 +1,2 @@
 pytest>=7.0.0
-training-shared @ file:../shared
+training-shared @ git+https://github.com/nicokiva/training_shared.git
