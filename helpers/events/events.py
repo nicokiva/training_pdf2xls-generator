@@ -1,6 +1,10 @@
 """
 Event publisher for pdf2xls-generator.
 
+SQLite is a file-based relational database — no server, no configuration.
+The whole database is a single .db file on disk, which makes it a perfect
+lightweight message queue between two scripts that run on the same machine.
+
 Writes events to a shared SQLite database that routine-analyzer reads on startup.
 This replaces the previous subprocess.run() call, so neither project depends
 on the other's file path or Python environment.
