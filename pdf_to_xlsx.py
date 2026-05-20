@@ -92,15 +92,23 @@ def main():
         if not args.credentials:
             print("\nError: --credentials is required when using --sheets-id")
             sys.exit(1)
+
+        analyzer = Path(__file__).parent.parent / "routine-analyzer" / "analyze.py"
+
+        # Pre-upload: analizar el historial existente antes de agregar la nueva rutina
+        if analyzer.exists():
+            print("\nRunning pre-upload analysis (global + monthly)...")
+            subprocess.run([sys.executable, str(analyzer), "--mode", "global"],  check=False)
+            subprocess.run([sys.executable, str(analyzer), "--mode", "monthly"], check=False)
+
         print(f"\nUpdating Google Sheets: {args.sheets_id}")
         service = get_sheets_service(args.credentials)
         write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=args.force)
         print(f"  Done! https://docs.google.com/spreadsheets/d/{args.sheets_id}")
 
-        # Disparar el análisis de nueva rutina automáticamente
-        analyzer = Path(__file__).parent.parent / "routine-analyzer" / "analyze.py"
+        # Post-upload: analizar la nueva rutina ya cargada en el sheet
         if analyzer.exists():
-            print("\nRunning new-routine analysis...")
+            print("\nRunning post-upload analysis (new-routine)...")
             subprocess.run([sys.executable, str(analyzer), "--mode", "new-routine"], check=False)
 
     if not args.no_xlsx and not args.sheets_id:
