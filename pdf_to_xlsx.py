@@ -104,8 +104,10 @@ def main():
             rename_tab(service, args.sheets_id, active_tab, closed_name)
 
         # Step 2: upload the new routine as NextMonday-...
+        # force=True because processing a new PDF always means creating a fresh tab.
+        # If a tab with the same name exists from a previous test run, overwrite it.
         print(f"\nUpdating Google Sheets: {args.sheets_id}")
-        write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=args.force)
+        write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=True)
         print(f"  Done! https://docs.google.com/spreadsheets/d/{args.sheets_id}")
 
         # Step 3: emit a single semantic event — routine-analyzer decides what to run

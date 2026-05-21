@@ -49,15 +49,21 @@ def get_sheet_id(service, spreadsheet_id, tab_name):
 
 def find_active_tab(service, spreadsheet_id):
     """
-    Returns the name of the currently active tab — the one whose name ends with '-...'
-    (meaning its end date is not set yet because the routine is still running).
+    Returns the name of the currently active tab — the one whose name matches
+    DD/MM/YY-... (end date not set, routine still running).
+
+    Tabs prefixed with 'ORIG' are intentionally excluded: they are preserved
+    copies of a routine that should never be renamed or closed automatically.
 
     Returns None if no active tab is found.
     """
+    import re
+    # Matches e.g. "18/05/26-..." but NOT "ORIG18/05/26-..."
+    pattern = re.compile(r"^\d{2}/\d{2}/\d{2}-\.\.\.$")
     meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     for s in meta["sheets"]:
         title = s["properties"]["title"]
-        if title.endswith("-..."):
+        if pattern.match(title):
             return title
     return None
 
