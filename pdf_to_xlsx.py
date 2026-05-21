@@ -22,8 +22,8 @@ from pathlib import Path
 import openpyxl
 
 from helpers.pdf_parser import parse_pdf
-from helpers.exercise   import make_tab_name, exercise_display_name
-from helpers.sheets     import get_sheets_service, write_to_google_sheets
+from helpers.exercise   import make_tab_name, make_closing_tab_name, exercise_display_name
+from helpers.sheets     import get_sheets_service, write_to_google_sheets, find_active_tab, rename_tab
 from helpers.xlsx       import write_xlsx_tab
 from helpers.events     import publish_event
 from training_shared.events import EventType
@@ -93,20 +93,24 @@ def main():
             print("\nError: --credentials is required when using --sheets-id")
             sys.exit(1)
 
-        # Pre-upload: publish events so routine-analyzer runs global + monthly
-        # BEFORE the new routine is added to the sheet.
-        print("\nPublishing pre-upload analysis events (global + monthly)...")
-        publish_event(EventType.RUN_GLOBAL)
-        publish_event(EventType.RUN_MONTHLY)
-
-        print(f"\nUpdating Google Sheets: {args.sheets_id}")
         service = get_sheets_service(args.credentials)
+
+        # Step 1: close the currently active tab (rename Fecha-... → Fecha-NextFriday)
+        active_tab = find_active_tab(service, args.sheets_id)
+        if active_tab:
+            start_str  = active_tab.replace("-...", "")
+            closed_name = make_closing_tab_name(start_str)
+            print(f"\nClosing active tab: '{active_tab}' → '{closed_name}'")
+            rename_tab(service, args.sheets_id, active_tab, closed_name)
+
+        # Step 2: upload the new routine as NextMonday-...
+        print(f"\nUpdating Google Sheets: {args.sheets_id}")
         write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=args.force)
         print(f"  Done! https://docs.google.com/spreadsheets/d/{args.sheets_id}")
 
-        # Post-upload: new-routine analysis runs AFTER the tab is in the sheet.
-        print("\nPublishing post-upload analysis event (new-routine)...")
-        publish_event(EventType.RUN_NEW_ROUTINE)
+        # Step 3: emit a single semantic event — routine-analyzer decides what to run
+        print("\nPublishing routine:uploaded event...")
+        publish_event(EventType.ROUTINE_UPLOADED)
 
     if not args.no_xlsx and not args.sheets_id:
         print("\nTip: use --sheets-id and --credentials to also sync to Google Sheets.")

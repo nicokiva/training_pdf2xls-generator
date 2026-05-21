@@ -5,6 +5,8 @@ from .sheets import (
     apply_sheet_formatting,
     build_sheet_values,
     write_to_google_sheets,
+    find_active_tab,
+    rename_tab,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "apply_sheet_formatting",
     "build_sheet_values",
     "write_to_google_sheets",
+    "find_active_tab",
+    "rename_tab",
 ]

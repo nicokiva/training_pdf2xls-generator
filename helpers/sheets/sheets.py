@@ -47,6 +47,44 @@ def get_sheet_id(service, spreadsheet_id, tab_name):
     raise ValueError(f"Tab '{tab_name}' not found")
 
 
+def find_active_tab(service, spreadsheet_id):
+    """
+    Returns the name of the currently active tab — the one whose name ends with '-...'
+    (meaning its end date is not set yet because the routine is still running).
+
+    Returns None if no active tab is found.
+    """
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    for s in meta["sheets"]:
+        title = s["properties"]["title"]
+        if title.endswith("-..."):
+            return title
+    return None
+
+
+def rename_tab(service, spreadsheet_id, old_name, new_name):
+    """
+    Renames a tab via the batchUpdate API.
+    Used to close the active tab by replacing '-...' with '-NextFriday'.
+
+    Args:
+        old_name: Current tab title, e.g. '18/05/26-...'
+        new_name: New tab title, e.g. '18/05/26-23/05/26'
+    """
+    sheet_id = get_sheet_id(service, spreadsheet_id, old_name)
+    # updateSheetProperties lets us change any tab property, including its title.
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{
+            "updateSheetProperties": {
+                "properties": {"sheetId": sheet_id, "title": new_name},
+                "fields": "title",
+            }
+        }]}
+    ).execute()
+    print(f"  Renamed tab: '{old_name}' → '{new_name}'")
+
+
 def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks=4, n_series=3):
     """
     Applies all visual formatting to the tab: borders, background colors, merged cells,
