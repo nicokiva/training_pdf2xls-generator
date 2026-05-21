@@ -22,7 +22,7 @@ from pathlib import Path
 import openpyxl
 
 from helpers.pdf_parser import parse_pdf
-from helpers.exercise   import make_tab_name, make_closing_tab_name, exercise_display_name
+from helpers.exercise   import make_tab_name, make_closing_tab_name, exercise_display_name, reorder_days
 from helpers.sheets     import get_sheets_service, write_to_google_sheets, find_active_tab, rename_tab
 from helpers.xlsx       import write_xlsx_tab
 from helpers.events     import publish_event
@@ -78,6 +78,10 @@ def main():
 
     tab_name = make_tab_name(data["vigencia_start"], data["vigencia_end"])
     print(f"\nTab name: {tab_name}")
+
+    # Reorder days to always follow: Pecho → Hombros → Piernas → Espalda,
+    # regardless of how the PDF lists them.
+    data["days"] = reorder_days(data["days"])
 
     # Write to local XLSX file (unless --no-xlsx was passed)
     if not args.no_xlsx:

@@ -105,3 +105,70 @@ class TestDayExerciseLayout:
 
     def test_empty_exercises_returns_empty(self):
         assert day_exercise_layout([]) == []
+
+
+def _make_exercises(*names):
+    """Helper: build a minimal exercise list with warmup + given main exercises."""
+    warmup = [
+        {"name": "Abdominal recto largo", "is_comb": False},
+        {"name": "Rotaciones de pie con disco", "is_comb": False},
+        {"name": "Extensión de cadera en banco", "is_comb": False},
+    ]
+    main = [{"name": n, "is_comb": False} for n in names]
+    return warmup + main
+
+
+class TestClassifyDay:
+    from helpers.exercise import classify_day
+
+    def test_pecho(self):
+        from helpers.exercise import classify_day
+        exs = _make_exercises("Empuje de pecho con barra en banco plano", "Peck Deck (pecho)", "Triceps con polea")
+        assert classify_day(exs) == "pecho"
+
+    def test_hombros(self):
+        from helpers.exercise import classify_day
+        exs = _make_exercises("Empuje de hombros con barra (sentado)", "Vuelos laterales con mancuernas", "Remo al mentón")
+        assert classify_day(exs) == "hombros"
+
+    def test_piernas(self):
+        from helpers.exercise import classify_day
+        exs = _make_exercises("Sentadilla clásica", "Peso muerto", "Prensa Hammer 45°", "Extensión de rodillas en máquina")
+        assert classify_day(exs) == "piernas"
+
+    def test_espalda(self):
+        from helpers.exercise import classify_day
+        exs = _make_exercises("Dominada estricta", "Tirón dorsal en polea", "Depresores en polea", "Biceps con polea")
+        assert classify_day(exs) == "espalda"
+
+
+class TestReorderDays:
+    def test_reorders_to_preferred_order(self):
+        from helpers.exercise import reorder_days
+        days = {
+            1: _make_exercises("Empuje de hombros con barra (sentado)", "Vuelos laterales con mancuernas"),
+            2: _make_exercises("Empuje de pecho con barra en banco plano", "Peck Deck (pecho)"),
+            3: _make_exercises("Sentadilla clásica", "Peso muerto"),
+            4: _make_exercises("Dominada estricta", "Tirón dorsal en polea"),
+        }
+        reordered = reorder_days(days)
+        # Keys stay 1..4; values should be pecho, hombros, piernas, espalda
+        from helpers.exercise import classify_day
+        assert classify_day(reordered[1]) == "pecho"
+        assert classify_day(reordered[2]) == "hombros"
+        assert classify_day(reordered[3]) == "piernas"
+        assert classify_day(reordered[4]) == "espalda"
+
+    def test_already_correct_order_unchanged(self):
+        from helpers.exercise import reorder_days, classify_day
+        days = {
+            1: _make_exercises("Empuje de pecho con barra en banco plano", "Peck Deck (pecho)"),
+            2: _make_exercises("Empuje de hombros con barra (sentado)", "Vuelos laterales con mancuernas"),
+            3: _make_exercises("Sentadilla clásica", "Peso muerto"),
+            4: _make_exercises("Dominada estricta", "Tirón dorsal en polea"),
+        }
+        reordered = reorder_days(days)
+        assert classify_day(reordered[1]) == "pecho"
+        assert classify_day(reordered[2]) == "hombros"
+        assert classify_day(reordered[3]) == "piernas"
+        assert classify_day(reordered[4]) == "espalda"

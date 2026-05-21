@@ -1,3 +1,3 @@
-from .exercise import make_tab_name, make_closing_tab_name, exercise_display_name, day_exercise_layout
+from .exercise import make_tab_name, make_closing_tab_name, exercise_display_name, day_exercise_layout, reorder_days, classify_day
 
-__all__ = ["make_tab_name", "make_closing_tab_name", "exercise_display_name", "day_exercise_layout"]
+__all__ = ["make_tab_name", "make_closing_tab_name", "exercise_display_name", "day_exercise_layout", "reorder_days", "classify_day"]
