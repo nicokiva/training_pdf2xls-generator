@@ -376,7 +376,7 @@ def build_sheet_values(days_data):
             if row_type == "blank":
                 all_rows.append([])
                 continue
-            ex_row = [exercise_display_name(ex)]
+            ex_row = [("[C] " if row_type == "comb" else "") + exercise_display_name(ex)]
             week_reps = ex.get("week_reps", [None, None, None, None])
             for week_idx in range(4):
                 reps = week_reps[week_idx] if week_reps[week_idx] is not None else [None, None, None]
