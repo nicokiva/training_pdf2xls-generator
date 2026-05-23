@@ -22,8 +22,8 @@ from pathlib import Path
 import openpyxl
 
 from helpers.pdf_parser import parse_pdf
-from helpers.exercise   import make_tab_name, make_closing_tab_name, exercise_display_name
-from helpers.sheets     import get_sheets_service, write_to_google_sheets, find_active_tab, rename_tab
+from helpers.exercise   import make_tab_name, exercise_display_name
+from helpers.sheets     import get_sheets_service, write_to_google_sheets
 from helpers.xlsx       import write_xlsx_tab
 from helpers.events     import publish_event
 from training_shared.events import EventType
@@ -95,17 +95,10 @@ def main():
 
         service = get_sheets_service(args.credentials)
 
-        # Step 1: close the currently active tab (rename Fecha-... → Fecha-NextFriday)
-        active_tab = find_active_tab(service, args.sheets_id)
-        if active_tab:
-            start_str  = active_tab.replace("-...", "")
-            closed_name = make_closing_tab_name(start_str)
-            print(f"\nClosing active tab: '{active_tab}' → '{closed_name}'")
-            rename_tab(service, args.sheets_id, active_tab, closed_name)
-
-        # Step 2: upload the new routine as NextMonday-...
+        # Upload the new routine as NextMonday-...
+        # The old active tab is NOT closed here — routine-analyzer handles that
+        # daily via try_close_completed_periods() once it detects two open tabs.
         # force=True because processing a new PDF always means creating a fresh tab.
-        # If a tab with the same name exists from a previous test run, overwrite it.
         print(f"\nUpdating Google Sheets: {args.sheets_id}")
         write_to_google_sheets(service, args.sheets_id, tab_name, data["days"], force=True)
         print(f"  Done! https://docs.google.com/spreadsheets/d/{args.sheets_id}")
