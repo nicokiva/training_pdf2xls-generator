@@ -120,8 +120,10 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
     ]
 
     # Total columns: 1 (name) + 4 weeks × 3 sets × 2 (Rep+Peso) = 25
+    # Col Z (index 25) is the suggested rest time column ("Pausa")
     n_data_cols = n_weeks * n_series * 2
-    total_cols  = 1 + n_data_cols
+    total_cols  = 1 + n_data_cols   # = 25, used as the start index of col Z
+    pausa_col   = total_cols        # = 25 (col Z, 0-based)
 
     def rng(r0, r1, c0, c1):
         """Shortcut to build a cell range (rows r0..r1, columns c0..c1)."""
@@ -154,6 +156,13 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             "properties": {"pixelSize": 45},
             "fields": "pixelSize",
         }},
+        # Col Z (Pausa): wider to fit rest-time text
+        {"updateDimensionProperties": {
+            "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
+                      "startIndex": pausa_col, "endIndex": pausa_col + 1},
+            "properties": {"pixelSize": 70},
+            "fields": "pixelSize",
+        }},
     ]
     current_row = 0   # current row (0-based index, as used by the Google API)
 
@@ -178,12 +187,12 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             }},
             "fields": "userEnteredFormat(textFormat,borders)",
         }})
-        # Cells B:Y merged + thick borders
+        # Cells B:Z merged + thick borders (includes pausa column)
         requests.append({"mergeCells": {
-            "range": rng(dia_row, dia_row+1, 1, total_cols), "mergeType": "MERGE_ALL"
+            "range": rng(dia_row, dia_row+1, 1, pausa_col+1), "mergeType": "MERGE_ALL"
         }})
         requests.append({"repeatCell": {
-            "range": rng(dia_row, dia_row+1, 1, total_cols),
+            "range": rng(dia_row, dia_row+1, 1, pausa_col+1),
             "cell": {"userEnteredFormat": {
                 "borders": {"top": THICK, "bottom": THICK, "right": THICK, "left": NO_BORDER},
             }},
@@ -245,6 +254,23 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                     "fields": "userEnteredFormat(backgroundColor,textFormat,borders)",
                 }})
                 col += 2
+
+        # ── Col Z "Pausa" header (spans series+label rows, same height as col A) ──
+        requests.append({"mergeCells": {
+            "range": rng(series_row, label_row+1, pausa_col, pausa_col+1),
+            "mergeType": "MERGE_ALL",
+        }})
+        requests.append({"repeatCell": {
+            "range": rng(series_row, label_row+1, pausa_col, pausa_col+1),
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": GREEN_BG,
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "textFormat": {"bold": True},
+                "borders": {"left": THICK, "right": THICK, "top": THIN, "bottom": THIN},
+            }},
+            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)",
+        }})
 
         # ── Exercise rows ─────────────────────────────────────────────────────
         layout = day_exercise_layout(exercises)
@@ -331,6 +357,56 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                     }})
                     col += 2
 
+        # ── Col Z: Pausa cells ─────────────────────────────────────────────────
+        # Individual exercises: one cell per row.
+        # Combined groups: merge all Z cells in the group into one
+        #   (rest applies after the last exercise, not between them).
+        z_idx = 0
+        while z_idx < len(layout):
+            row_type, _ = layout[z_idx]
+            if row_type == "comb":
+                # Collect the full consecutive combined group
+                group_start = z_idx
+                while z_idx < len(layout) and layout[z_idx][0] == "comb":
+                    z_idx += 1
+                group_end    = z_idx - 1
+                abs_start    = ex_start + group_start
+                abs_end      = ex_start + group_end
+                is_last_item = (group_end == last_ex_layout_idx)
+
+                requests.append({"mergeCells": {
+                    "range": rng(abs_start, abs_end+1, pausa_col, pausa_col+1),
+                    "mergeType": "MERGE_ALL",
+                }})
+                z_borders = {"left": THICK, "right": THICK, "top": THIN}
+                if is_last_item:
+                    z_borders["bottom"] = THICK
+                requests.append({"repeatCell": {
+                    "range": rng(abs_start, abs_end+1, pausa_col, pausa_col+1),
+                    "cell": {"userEnteredFormat": {
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE",
+                        "borders": z_borders,
+                    }},
+                    "fields": "userEnteredFormat(horizontalAlignment,verticalAlignment,borders)",
+                }})
+            else:
+                abs_row      = ex_start + z_idx
+                is_last_item = (z_idx == last_ex_layout_idx)
+                z_borders    = {"left": THICK, "right": THICK, "top": THIN}
+                if is_last_item:
+                    z_borders["bottom"] = THICK
+                requests.append({"repeatCell": {
+                    "range": rng(abs_row, abs_row+1, pausa_col, pausa_col+1),
+                    "cell": {"userEnteredFormat": {
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE",
+                        "borders": z_borders,
+                    }},
+                    "fields": "userEnteredFormat(horizontalAlignment,verticalAlignment,borders)",
+                }})
+                z_idx += 1
+
         # Advance current_row: 3 header rows + exercise rows + 2 blank rows
         current_row += 3 + len(layout) + 2
 
@@ -362,6 +438,7 @@ def build_sheet_values(days_data):
         for _week in range(4):
             for s in range(1, 4):
                 series_row.extend([s, ""])
+        series_row.append("Pausa")   # col Z header
         all_rows.append(series_row)
 
         # Labels row
@@ -369,6 +446,7 @@ def build_sheet_values(days_data):
         for _week in range(4):
             for _s in range(3):
                 label_row.extend(["Rep.", "Peso"])
+        label_row.append("")         # col Z (merged with series row above)
         all_rows.append(label_row)
 
         # Exercise rows
@@ -383,6 +461,7 @@ def build_sheet_values(days_data):
                 for s in range(3):
                     ex_row.append(reps[s] if s < len(reps) else "")
                     ex_row.append("")   # Peso column (filled in manually)
+            ex_row.append("")            # col Z: Pausa (filled by writer with suggested rest)
             all_rows.append(ex_row)
 
         # Two blank rows between days
