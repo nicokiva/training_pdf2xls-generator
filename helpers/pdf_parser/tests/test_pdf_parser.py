@@ -1,13 +1,56 @@
 """
 Tests for helpers/pdf_parser/pdf_parser.py — pure functions only (no PDF I/O).
+
+parse_column is tested with synthetic word lists that simulate pdfplumber output.
+parse_pdf requires a real PDF and is exercised through integration, not unit tests.
 """
 import pytest
 from helpers.pdf_parser import group_lines, line_text, is_exercise_number
+from helpers.pdf_parser.pdf_parser import parse_column
 
 
 def _word(text, x0, top):
     """Helper to create a word dict like pdfplumber returns."""
     return {"text": text, "x0": x0, "top": top}
+
+
+# ---------------------------------------------------------------------------
+# Synthetic word-list helpers for parse_column
+# ---------------------------------------------------------------------------
+
+def _ex_words(number, name, top, x0=60, reps=(10, 9, 8, 7)):
+    """
+    Build the minimal set of words needed for ONE left-column exercise entry.
+
+    Produces: number word, name word, 'repeticiones' + 3 rep values,
+    and 2da/3ra/4ta progression lines.
+    The x0 defaults (60 for number, 100 for name) fall inside
+    LEFT_EX_NUM_X_RANGE (55-80).
+    """
+    return [
+        {"text": str(number), "x0": x0,      "top": top},
+        {"text": name,        "x0": x0 + 40, "top": top},
+        # Week 1 repetitions
+        {"text": "repeticiones", "x0": x0,       "top": top + 20},
+        {"text": str(reps[0]),   "x0": x0 + 70,  "top": top + 20},
+        {"text": str(reps[0]),   "x0": x0 + 90,  "top": top + 20},
+        {"text": str(reps[0]),   "x0": x0 + 110, "top": top + 20},
+        # Week 2-4 progressions
+        {"text": "2da", "x0": x0,      "top": top + 40},
+        {"text": str(reps[1]), "x0": x0 + 40, "top": top + 40},
+        {"text": "3ra", "x0": x0,      "top": top + 60},
+        {"text": str(reps[2]), "x0": x0 + 40, "top": top + 60},
+        {"text": "4ta", "x0": x0,      "top": top + 80},
+        {"text": str(reps[3]), "x0": x0 + 40, "top": top + 80},
+    ]
+
+
+def _comb_header(count, x0=60, top=240):
+    """Words for a 'Comb xN' marker line."""
+    return [
+        {"text": "Comb",       "x0": x0,      "top": top},
+        {"text": f"x{count}",  "x0": x0 + 40, "top": top},
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -125,3 +168,119 @@ class TestIsExerciseNumber:
         word_max = _word("20", 80, 300)  # LEFT max boundary
         assert is_exercise_number(word_min, "left") is True
         assert is_exercise_number(word_max, "left") is True
+
+
+# ---------------------------------------------------------------------------
+# parse_column
+# ---------------------------------------------------------------------------
+
+class TestParseColumn:
+    """
+    Tests for parse_column using synthetic word lists.
+
+    The LEFT_EX_NUM_X_RANGE is (55, 80), so exercise numbers use x0=60.
+    We call parse_column with header_bottom_y=0 so no words are filtered out
+    by the header.  All words must fall inside x_min=0, x_max=290.
+    """
+
+    def _single_exercise(self, number=1, name="Sentadilla", top=250):
+        """Minimal words for one left-column exercise."""
+        return _ex_words(number, name, top)
+
+    def _two_exercise_comb(self):
+        """Words for a 'Comb x2' block with two consecutive exercises."""
+        return (
+            _comb_header(2, top=240)
+            + _ex_words(1, "PrimerEjercicio",   top=260)
+            + _ex_words(2, "SegundoEjercicio",  top=360)
+        )
+
+    # ── Position fields ──────────────────────────────────────────────────
+
+    def test_exercise_stores_top(self):
+        exs, _ = parse_column(self._single_exercise(top=250), 0, 290, "left", 0)
+        assert exs[0]["top"] == 250
+
+    def test_exercise_stores_x0(self):
+        exs, _ = parse_column(self._single_exercise(), 0, 290, "left", 0)
+        assert exs[0]["x0"] == 60   # default x0 for left-col number
+
+    def test_exercise_top_reflects_number_word_position(self):
+        # Two exercises at different Y — each should record its own top
+        words = _ex_words(1, "Primero", top=300) + _ex_words(2, "Segundo", top=500)
+        exs, _ = parse_column(words, 0, 290, "left", 0)
+        assert exs[0]["top"] == 300
+        assert exs[1]["top"] == 500
+
+    # ── Comb group format ────────────────────────────────────────────────
+
+    def test_solo_exercise_has_empty_comb_groups(self):
+        _, combs = parse_column(self._single_exercise(), 0, 290, "left", 0)
+        assert combs == []
+
+    def test_comb_block_produces_one_group(self):
+        _, combs = parse_column(self._two_exercise_comb(), 0, 290, "left", 0)
+        assert len(combs) == 1
+
+    def test_comb_groups_entry_is_object_reference_not_number(self):
+        """comb_groups must store a reference to the exercise dict, not its number."""
+        exs, combs = parse_column(self._two_exercise_comb(), 0, 290, "left", 0)
+        start_ref, count = combs[0]
+        assert start_ref is exs[0], "comb_groups[0][0] must be the same object as exercises[0]"
+
+    def test_comb_groups_count_matches_comb_header(self):
+        _, combs = parse_column(self._two_exercise_comb(), 0, 290, "left", 0)
+        assert combs[0][1] == 2
+
+    def test_comb_exercises_marked_is_comb_true(self):
+        exs, _ = parse_column(self._two_exercise_comb(), 0, 290, "left", 0)
+        assert exs[0]["is_comb"] is True
+        assert exs[1]["is_comb"] is True
+
+    def test_solo_exercise_is_comb_false(self):
+        exs, _ = parse_column(self._single_exercise(), 0, 290, "left", 0)
+        assert exs[0]["is_comb"] is False
+
+    def test_two_comb_groups_stored_separately(self):
+        """Two 'Comb x2' blocks must produce two separate entries in comb_groups."""
+        words = (
+            _comb_header(2, top=240)
+            + _ex_words(1, "A", top=260)
+            + _ex_words(2, "B", top=360)
+            + _comb_header(2, top=470)
+            + _ex_words(3, "C", top=490)
+            + _ex_words(4, "D", top=590)
+        )
+        exs, combs = parse_column(words, 0, 290, "left", 0)
+        assert len(combs) == 2
+        assert combs[0][0] is exs[0]   # first group starts at exercise 0
+        assert combs[1][0] is exs[2]   # second group starts at exercise 2
+        assert combs[0][1] == 2
+        assert combs[1][1] == 2
+
+    def test_exercise_after_comb_block_is_not_comb(self):
+        """An exercise that follows a completed Comb block must not be marked as comb."""
+        words = (
+            _comb_header(2, top=240)
+            + _ex_words(1, "CombA", top=260)
+            + _ex_words(2, "CombB", top=360)
+            + _ex_words(3, "Solo",  top=470)
+        )
+        exs, _ = parse_column(words, 0, 290, "left", 0)
+        assert exs[0]["is_comb"] is True
+        assert exs[1]["is_comb"] is True
+        assert exs[2]["is_comb"] is False
+
+    # ── Header filtering ─────────────────────────────────────────────────
+
+    def test_words_above_header_are_ignored(self):
+        """Words with top <= header_bottom_y should be skipped."""
+        # Exercise at top=100, header at 200 → exercise should be excluded
+        words = _ex_words(1, "Escondido", top=100)
+        exs, _ = parse_column(words, 0, 290, "left", header_bottom_y=200)
+        assert exs == []
+
+    def test_words_below_header_are_included(self):
+        words = _ex_words(1, "Visible", top=250)
+        exs, _ = parse_column(words, 0, 290, "left", header_bottom_y=200)
+        assert len(exs) == 1

@@ -87,3 +87,72 @@ class TestBuildSheetValues:
         result = build_sheet_values(self._make_days_data())
         all_values = [cell for row in result for cell in row]
         assert "Sentadilla" in all_values
+
+
+# ---------------------------------------------------------------------------
+# build_sheet_values — comb exercises
+# ---------------------------------------------------------------------------
+
+class TestBuildSheetValuesComb:
+    """
+    Verifies that combined exercises are prefixed with '[C] ' in column A,
+    and that the prefix is applied correctly for adjacent comb groups
+    with different comb_group IDs.
+    """
+
+    _WEEK_REPS = [[10, 10, 10], [9, 9, 9], [8, 8, 8], [7, 7, 7]]
+
+    def _make_ex(self, name, is_comb, comb_group=None):
+        ex = {"name": name, "is_comb": is_comb, "week_reps": self._WEEK_REPS}
+        if comb_group is not None:
+            ex["comb_group"] = comb_group
+        return ex
+
+    def test_comb_exercise_has_C_prefix(self):
+        from helpers.sheets import build_sheet_values
+        days = {1: [self._make_ex("Abdominal", is_comb=True, comb_group=0)]}
+        result = build_sheet_values(days)
+        all_values = [cell for row in result for cell in row]
+        assert "[C] Abdominal" in all_values
+
+    def test_solo_exercise_has_no_C_prefix(self):
+        from helpers.sheets import build_sheet_values
+        days = {1: [self._make_ex("Sentadilla", is_comb=False)]}
+        result = build_sheet_values(days)
+        all_values = [cell for row in result for cell in row]
+        assert "Sentadilla" in all_values
+        assert not any("[C]" in str(v) for v in all_values)
+
+    def test_adjacent_comb_groups_both_have_C_prefix(self):
+        """Two consecutive comb groups (different comb_group IDs) must both show [C]."""
+        from helpers.sheets import build_sheet_values
+        days = {
+            1: [
+                self._make_ex("Abdominal",  is_comb=True, comb_group=0),
+                self._make_ex("Twist ruso", is_comb=True, comb_group=0),
+                self._make_ex("Apertura",   is_comb=True, comb_group=1),
+                self._make_ex("Press incl", is_comb=True, comb_group=1),
+            ]
+        }
+        result = build_sheet_values(days)
+        all_values = [cell for row in result for cell in row]
+        assert "[C] Abdominal"  in all_values
+        assert "[C] Twist ruso" in all_values
+        assert "[C] Apertura"   in all_values
+        assert "[C] Press incl" in all_values
+
+    def test_mixed_comb_and_solo(self):
+        from helpers.sheets import build_sheet_values
+        days = {
+            1: [
+                self._make_ex("CombA", is_comb=True,  comb_group=0),
+                self._make_ex("Solo",  is_comb=False),
+                self._make_ex("CombB", is_comb=True,  comb_group=1),
+            ]
+        }
+        result = build_sheet_values(days)
+        all_values = [cell for row in result for cell in row]
+        assert "[C] CombA" in all_values
+        assert "Solo"      in all_values
+        assert not any(v == "[C] Solo" for v in all_values)
+        assert "[C] CombB" in all_values

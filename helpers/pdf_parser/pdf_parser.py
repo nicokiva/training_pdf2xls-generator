@@ -63,13 +63,13 @@ def group_lines(words, y_tolerance=4):
 
 
 def line_text(line):
-    """Joins the words of a line into a space-separated string."""
+    """Returns the human-readable text for one grouped PDF line."""
     return " ".join(w["text"] for w in line)
 
 
 def is_exercise_number(word, col):
     """
-    Determines if a word is an exercise number.
+    Returns True when a word is the exercise number marker for a column.
 
     PDFs have exercise numbers at specific X positions.
     This function verifies that:
@@ -98,14 +98,21 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
     and builds a list of exercises with their weekly repetitions.
 
     Returns a tuple:
-        exercises   — list of dicts: {number, name, is_comb, week_reps}
-        comb_groups — list of [first_number, count] to re-apply combos cross-column
+        exercises   — list of dicts: {number, name, is_comb, top, x0, week_reps}
+                      top/x0 preserve the visual location of the exercise number so
+                      the caller can reconstruct page order across both columns.
+        comb_groups — list of [first_ex_ref, count] to re-apply combos cross-column.
+                      first_ex_ref is the actual exercise object stored in exercises,
+                      not a copied identifier, so the caller can find the exact start
+                      row even when exercise numbers restart in the right column.
     """
     # Filter only words that fall in this column and below the header
     words = [w for w in all_words if x_min <= w["x0"] < x_max and w["top"] > header_bottom_y]
     if not words:
         return [], []
 
+    # Work line-by-line after spatial grouping; the parser logic depends on the
+    # visual reading order more than on the raw word list returned by pdfplumber.
     lines = group_lines(words)
 
     exercises          = []
@@ -114,8 +121,8 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
     week_reps          = [None, None, None, None]   # repetitions for 4 weeks
     comb_count         = 0        # how many exercises the current Comb has
     comb_assigned      = 0        # how many of the Comb have been marked
-    comb_groups        = []       # to re-apply combos cross-column later
-    current_comb_start = None     # number of the first exercise in the current Comb
+    comb_groups        = []       # to re-apply combos cross-column later; entries: [ex_ref, count]
+    current_comb_start = None     # reference to the first exercise in the current Comb
 
     def save_exercise():
         """
@@ -138,7 +145,9 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
         if re.match(r"^Series\s+\d", txt) or re.match(r"^kg\b", txt):
             continue
 
-        # Detect "Comb xN" — indicates the next N exercises are combined
+        # Detect "Comb xN" — indicates the next N exercises are combined.
+        # The actual group may continue across columns, so here we only record
+        # where the group starts inside this column and how many items it spans.
         m_comb = re.match(r"^Comb\s+x(\d+)", txt, re.IGNORECASE)
         if m_comb:
             comb_count = int(m_comb.group(1))
@@ -173,8 +182,8 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
                 current_ex.setdefault("comment", comment)
             continue
 
-        # Check if any word in this line is an exercise number
-        # next(..., None) returns the first element matching the condition, or None if none
+        # Check if any word in this line is an exercise number.
+        # next(..., None) returns the first element matching the condition, or None if none.
         ex_num_word = next((w for w in line if is_exercise_number(w, col_side)), None)
 
         if ex_num_word is not None:
@@ -197,23 +206,29 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
             else:
                 name = name_from_above
 
-            # Create the exercise dict
-            current_ex = {"number": num, "name": name.strip(), "is_comb": False}
+            # Store the exercise-number position. The caller later sorts all
+            # exercises from both columns by (top, x0) to reconstruct the true
+            # visual order of the page before re-applying Comb membership.
+            ex_top = ex_num_word.get("top", 0)
+            ex_x0  = ex_num_word.get("x0", 0)
+            current_ex = {"number": num, "name": name.strip(), "is_comb": False,
+                          "top": ex_top, "x0": ex_x0}
 
             # Mark as combined if we are inside a Comb block
             if comb_count > 0 and comb_assigned < comb_count:
                 current_ex["is_comb"] = True
                 if current_comb_start is None:
-                    # Register the group start to re-apply it cross-column
-                    current_comb_start = num
-                    comb_groups.append([num, comb_count])
+                    # Register the first object of the group. Using the object
+                    # reference avoids ambiguous lookups when the right column
+                    # restarts numbering from 1.
+                    current_comb_start = current_ex
+                    comb_groups.append([current_ex, comb_count])
                 comb_assigned += 1
                 if comb_assigned >= comb_count:
                     # Comb group finished, reset counters
                     comb_count = 0
                     comb_assigned = 0
                     current_comb_start = None
-
             pending_name_parts = []
             week_reps = [None, None, None, None]
             continue
@@ -227,7 +242,9 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
                     # Name that appears BEFORE the next exercise's number
                     pending_name_parts.append(txt)
                 elif week_reps[0] is None:
-                    # Name continuation, before "repeticiones"
+                    # Name continuation, before "repeticiones".
+                    # Some exercise names wrap onto their own line instead of
+                    # fitting next to the exercise number.
                     current_ex["name"] = (current_ex["name"] + " " + txt).strip()
                 else:
                     # Text after "repeticiones" that is not a progression → it's a comment
@@ -251,7 +268,8 @@ def parse_pdf(pdf_path):
     is automatically propagated to ALL days.
     """
     result = {"vigencia_start": None, "vigencia_end": None, "days": {}}
-    first_pdf_day = None   # day from the first PDF page (to identify the universal Comb)
+    first_pdf_day   = None   # day from the first PDF page (to identify the universal Comb)
+    comb_group_id   = 0      # globally unique ID per comb group across all pages
 
     # Open the PDF with pdfplumber ('with' ensures it is closed when done)
     with pdfplumber.open(pdf_path) as pdf:
@@ -291,43 +309,72 @@ def parse_pdf(pdf_path):
             left_ex,  left_comb_groups  = parse_column(words, 0, COL_SPLIT_X, "left",  effective_header_bottom)
             right_ex, right_comb_groups = parse_column(words, COL_SPLIT_X, 9999, "right", effective_header_bottom)
 
-            # Merge both columns sorted by exercise number
-            all_ex = sorted(left_ex + right_ex, key=lambda e: e["number"])
+            # Merge both columns sorted by page position (top-to-bottom, left-to-right).
+            # Sorting by (top, x0) preserves the visual page order, which is critical
+            # for correctly identifying combined pairs when the right column restarts
+            # exercise numbering (e.g. right-col #1 pairs with left-col #9).
+            all_ex = sorted(left_ex + right_ex, key=lambda e: (e.get("top", 0), e.get("x0", 0)))
 
             # Re-apply Comb membership globally.
             # Problem: parse_column marks combos within its own column.
             # If a Comb has exercises in both columns (e.g. 1 left, 2 right, 3 left),
             # the right column doesn't know that exercise 2 is part of the Comb.
-            # Solution: use comb_groups (start + count) to mark the correct
+            # Solution: use comb_groups (object reference + count) to mark the correct
             # exercises in the combined list from both columns.
             all_comb_groups = left_comb_groups + right_comb_groups
             if all_comb_groups:
                 for ex in all_ex:
                     ex["is_comb"] = False   # reset first
-                all_numbers = [ex["number"] for ex in all_ex]
-                for start_num, count in all_comb_groups:
-                    if start_num not in all_numbers:
+                for start_ex, count in all_comb_groups:
+                    # Find the starting exercise by object identity (not by number),
+                    # so number resets / duplicates in the right column are handled correctly.
+                    start_idx = next((i for i, e in enumerate(all_ex) if e is start_ex), None)
+                    if start_idx is None:
                         continue
-                    start_idx = all_numbers.index(start_num)
-                    # Mark 'count' consecutive exercises starting from the beginning
                     for i in range(start_idx, min(start_idx + count, len(all_ex))):
-                        all_ex[i]["is_comb"] = True
+                        all_ex[i]["is_comb"]       = True
+                        all_ex[i]["comb_group"]    = comb_group_id
+                    # Give each Comb its own stable page-level ID so later Sheet
+                    # formatting can distinguish adjacent combined blocks.
+                    comb_group_id += 1
 
             if day_num not in result["days"]:
                 result["days"][day_num] = []
             result["days"][day_num].extend(all_ex)
 
+            # Remember the first day's Comb metadata so we can later identify the
+            # universal warmup block without guessing from exercise names alone.
+            if day_num == first_pdf_day and all_comb_groups and "_first_day_comb_groups" not in result:
+                result["_first_day_comb_groups"] = all_comb_groups
+
     # ── Propagate universal exercises (Comb from the first day) to all days ──
     # Abs and similar exercises appear only on the first PDF page
     # but must be present in all days.
     if first_pdf_day and first_pdf_day in result["days"]:
-        universal_comb = [ex for ex in result["days"][first_pdf_day] if ex.get("is_comb")]
+        # The warmup is the FIRST comb group (topmost on the page) in the first day.
+        # Use comb_groups to know exactly how many exercises it contains, avoiding
+        # accidentally including other Comb groups that start right after the warmup.
+        # Keep the temporary metadata out of the public return value.
+        first_day_groups = result.pop("_first_day_comb_groups", [])
+        warmup_count = 0
+        if first_day_groups:
+            # The universal warmup is defined as the earliest Comb block on the
+            # first day. We use the recorded count of that block so we copy only
+            # its members, even if another Comb starts immediately afterwards.
+            earliest = min(first_day_groups, key=lambda g: g[0].get("top", 0))
+            warmup_count = earliest[1]
+        universal_comb = [ex for ex in result["days"][first_pdf_day][:warmup_count]
+                          if ex.get("is_comb")]
         if universal_comb:
+            universal_names = {ex["name"] for ex in universal_comb}
             for day_num, exercises in result["days"].items():
                 if day_num == first_pdf_day:
                     continue   # first day already has them
-                if not exercises or not exercises[0].get("is_comb"):
-                    # dict(ex) creates an independent copy of the dict (not a reference)
+                # Only prepend if the universal exercises are missing entirely.
+                # Name-based detection is sufficient here because these copied
+                # warmup exercises should appear unchanged across days.
+                existing_names = {ex["name"] for ex in exercises}
+                if not universal_names.intersection(existing_names):
                     prepend = [dict(ex) for ex in universal_comb]
                     result["days"][day_num] = prepend + exercises
 

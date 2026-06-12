@@ -99,6 +99,10 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
     The Google Sheets API works with "requests" (change requests) that are
     accumulated in a list and sent all at once in a single batchUpdate call.
     This is more efficient than making one call per change.
+
+    Combined exercises need special handling: adjacent "comb" rows may still
+    belong to different Comb groups, so borders and merged pause cells must
+    respect the ``comb_group`` IDs assigned by the PDF parser.
     """
     # ── Border styles ─────────────────────────────────────────────────────────
     THICK     = {"style": "SOLID_THICK", "colorStyle": {"rgbColor": {}}}   # thick black border
@@ -222,11 +226,11 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 requests.append({"repeatCell": {
                     "range": rng(series_row, series_row+1, col, col+2),
                     "cell": {"userEnteredFormat": {
-                        "backgroundColor": GREEN_BG,
+                        "backgroundColorStyle": {"rgbColor": GREEN_BG},
                         "horizontalAlignment": "CENTER",
                         "borders": {"left": THIN, "right": rb},
                     }},
-                    "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,borders)",
+                    "fields": "userEnteredFormat(backgroundColorStyle,horizontalAlignment,borders)",
                 }})
                 col += 2
 
@@ -238,20 +242,20 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 requests.append({"repeatCell": {
                     "range": rng(label_row, label_row+1, col, col+1),
                     "cell": {"userEnteredFormat": {
-                        "backgroundColor": GRAY_BG,
+                        "backgroundColorStyle": {"rgbColor": GRAY_BG},
                         "textFormat": {"bold": True},
                         "borders": {"left": THIN},
                     }},
-                    "fields": "userEnteredFormat(backgroundColor,textFormat,borders)",
+                    "fields": "userEnteredFormat(backgroundColorStyle,textFormat,borders)",
                 }})
                 requests.append({"repeatCell": {
                     "range": rng(label_row, label_row+1, col+1, col+2),
                     "cell": {"userEnteredFormat": {
-                        "backgroundColor": GRAY_BG,
+                        "backgroundColorStyle": {"rgbColor": GRAY_BG},
                         "textFormat": {"bold": True},
                         "borders": {"right": rb},
                     }},
-                    "fields": "userEnteredFormat(backgroundColor,textFormat,borders)",
+                    "fields": "userEnteredFormat(backgroundColorStyle,textFormat,borders)",
                 }})
                 col += 2
 
@@ -263,13 +267,13 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
         requests.append({"repeatCell": {
             "range": rng(series_row, label_row+1, pausa_col, pausa_col+1),
             "cell": {"userEnteredFormat": {
-                "backgroundColor": GREEN_BG,
+                "backgroundColorStyle": {"rgbColor": GREEN_BG},
                 "horizontalAlignment": "CENTER",
                 "verticalAlignment": "MIDDLE",
                 "textFormat": {"bold": True},
                 "borders": {"left": THICK, "right": THICK, "top": THIN, "bottom": THIN},
             }},
-            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)",
+            "fields": "userEnteredFormat(backgroundColorStyle,horizontalAlignment,verticalAlignment,textFormat,borders)",
         }})
 
         # ── Exercise rows ─────────────────────────────────────────────────────
@@ -288,12 +292,21 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             bg      = PEACH_BG if is_comb else WHITE_BG
             is_last = (layout_idx == last_ex_layout_idx)
 
-            # Determine if this is the first exercise in its group (for top border)
+            # Determine whether this row starts a new visual block.
+            # For solos, a row starts a block whenever the previous non-blank row
+            # is absent or has a different row type. For combined exercises, the
+            # same rule is not enough: two adjacent comb rows may belong to two
+            # distinct Comb groups, so a comb_group boundary must restart borders.
             prev_non_blank = next(
                 (layout[j] for j in range(layout_idx - 1, -1, -1) if layout[j][0] != "blank"),
                 None,
             )
             is_first_in_group = (prev_non_blank is None) or (prev_non_blank[0] != row_type)
+            if not is_first_in_group and is_comb and prev_non_blank is not None:
+                # Adjacent combs from different parser groups must not visually
+                # collapse into one larger block.
+                if prev_non_blank[1].get("comb_group") != ex.get("comb_group"):
+                    is_first_in_group = True
 
             # Border for the name cell (col A)
             name_borders = {"left": THICK, "right": THIN}
@@ -311,11 +324,11 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             requests.append({"repeatCell": {
                 "range": rng(cur, cur+1, 0, 1),
                 "cell": {"userEnteredFormat": {
-                    "backgroundColor": bg,
+                    "backgroundColorStyle": {"rgbColor": bg},
                     "borders": name_borders,
                     "wrapStrategy": "WRAP",   # long text wraps to the next line
                 }},
-                "fields": "userEnteredFormat(backgroundColor,borders,wrapStrategy)",
+                "fields": "userEnteredFormat(backgroundColorStyle,borders,wrapStrategy)",
             }})
 
             # ── Data cells (Rep + Peso for each set of each week) ──
@@ -344,30 +357,36 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                     requests.append({"repeatCell": {
                         "range": rng(cur, cur+1, col, col+1),
                         "cell": {"userEnteredFormat": {
-                            "backgroundColor": week_bg, "borders": rep_borders,
+                            "backgroundColorStyle": {"rgbColor": week_bg}, "borders": rep_borders,
                         }},
-                        "fields": "userEnteredFormat(backgroundColor,borders)",
+                        "fields": "userEnteredFormat(backgroundColorStyle,borders)",
                     }})
                     requests.append({"repeatCell": {
                         "range": rng(cur, cur+1, col+1, col+2),
                         "cell": {"userEnteredFormat": {
-                            "backgroundColor": week_bg, "borders": peso_borders,
+                            "backgroundColorStyle": {"rgbColor": week_bg}, "borders": peso_borders,
                         }},
-                        "fields": "userEnteredFormat(backgroundColor,borders)",
+                        "fields": "userEnteredFormat(backgroundColorStyle,borders)",
                     }})
                     col += 2
 
         # ── Col Z: Pausa cells ─────────────────────────────────────────────────
         # Individual exercises: one cell per row.
-        # Combined groups: merge all Z cells in the group into one
-        #   (rest applies after the last exercise, not between them).
+        # Combined groups: merge all Z cells in the same comb_group into one,
+        # because the suggested rest applies after the full combined block, not
+        # between exercises inside that block.
         z_idx = 0
         while z_idx < len(layout):
             row_type, _ = layout[z_idx]
             if row_type == "comb":
-                # Collect the full consecutive combined group
-                group_start = z_idx
-                while z_idx < len(layout) and layout[z_idx][0] == "comb":
+                # Collect only the current consecutive comb_group. This extra
+                # boundary check prevents back-to-back Comb groups from sharing
+                # one merged Z cell just because both rows are typed as "comb".
+                group_start      = z_idx
+                first_comb_group = layout[z_idx][1].get("comb_group")
+                while (z_idx < len(layout)
+                       and layout[z_idx][0] == "comb"
+                       and layout[z_idx][1].get("comb_group") == first_comb_group):
                     z_idx += 1
                 group_end    = z_idx - 1
                 abs_start    = ex_start + group_start
@@ -422,6 +441,9 @@ def build_sheet_values(days_data):
     """
     Builds the data grid (list of lists) to write to Google Sheets.
     Each inner list represents a row; each element, a cell.
+
+    The row order mirrors day_exercise_layout() so the values grid and the
+    formatting pass operate on the same row structure.
     """
     all_rows = []
 
@@ -479,6 +501,9 @@ def write_to_google_sheets(service, spreadsheet_id, tab_name, days_data, force=F
     If the tab already exists:
         - With force=False: does nothing (avoids accidental overwrite)
         - With force=True:  deletes the existing tab and recreates it from scratch
+
+    Recreating the tab is simpler than trying to diff old formatting, merged
+    cells and values against the new routine structure.
     """
     sheets = service.spreadsheets()
 

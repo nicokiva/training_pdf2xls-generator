@@ -135,17 +135,6 @@ def reorder_days(days_dict):
     return {day_num: exs for day_num, (_, exs) in zip(day_numbers, sorted_days)}
 
 
-
-    """
-    Returns the exercise name for display in the spreadsheet.
-    If the exercise has a comment (e.g. "HANDS BEHIND THE NECK"),
-    appends it in lowercase in parentheses: "Long straight abdominal (hands behind the neck)"
-    """
-    name    = ex["name"]
-    comment = ex.get("comment", "").strip()
-    return f"{name} ({comment.lower()})" if comment else name
-
-
 def day_exercise_layout(exercises):
     """
     Converts the list of exercises for a day into (type, exercise) pairs.
