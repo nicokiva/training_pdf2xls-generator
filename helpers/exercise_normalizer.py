@@ -5,6 +5,10 @@ Loads exercise_mapping.json and maps raw PDF exercise names to their
 canonical forms. For names not in the mapping, applies automatic formatting
 rules: agarre/posición qualifiers are moved to parentheses at the end.
 
+When an exercise is NOT found in the mapping, the auto-formatted name is used
+AND the new entry is automatically written back to exercise_mapping.json so
+the user can review and adjust it without having to add it manually.
+
 The mapping file is loaded lazily and cached in the module-level _mapping
 variable. This keeps repeated normalizations cheap while avoiding file I/O
 at import time.
@@ -12,6 +16,7 @@ at import time.
 
 import json
 import re
+import sys
 from pathlib import Path
 
 _MAPPING_PATH = Path(__file__).parent / "exercise_mapping.json"
@@ -26,6 +31,12 @@ def _load_mapping() -> dict:
         with open(_MAPPING_PATH, encoding="utf-8") as f:
             _mapping = json.load(f)
     return _mapping
+
+
+def _save_mapping(mapping: dict) -> None:
+    """Writes the in-memory mapping back to exercise_mapping.json (sorted by key)."""
+    with open(_MAPPING_PATH, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def _auto_format(name: str) -> str:
@@ -66,12 +77,28 @@ def normalize_exercise_name(name: str) -> str:
     Returns the canonical display name for a raw exercise label.
 
     Exact matches from exercise_mapping.json take priority. When no explicit
-    mapping exists, a conservative automatic formatter is applied instead.
+    mapping exists, a conservative automatic formatter is applied and the new
+    entry is written back to exercise_mapping.json with a warning printed to
+    stderr so the user can review and correct the auto-generated canonical.
     """
     mapping = _load_mapping()
     if name in mapping:
         return mapping[name]
-    return _auto_format(name)
+
+    canonical = _auto_format(name)
+
+    # Persist the new entry immediately so the user can review it
+    mapping[name] = canonical
+    _save_mapping(mapping)
+
+    print(
+        f"\n⚠️  UNMAPPED EXERCISE — added to exercise_mapping.json automatically:\n"
+        f'   "{name}" → "{canonical}"\n'
+        f"   Edit helpers/exercise_mapping.json if the canonical name is wrong.\n",
+        file=sys.stderr,
+    )
+
+    return canonical
 
 
 def normalize_exercises(exercises: list) -> list:
