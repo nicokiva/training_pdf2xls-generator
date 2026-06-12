@@ -23,6 +23,11 @@ _MAPPING_PATH = Path(__file__).parent / "exercise_mapping.json"
 # Lazy in-memory cache populated by _load_mapping() on first use.
 _mapping = None
 
+# exercise_catalog.json lives in the shared/ sibling project.
+_CATALOG_PATH = Path(__file__).parent.parent.parent / "shared" / "training_shared" / "exercise_catalog.json"
+# Lazy set of canonical exercise names from the catalog.
+_catalog_names = None
+
 
 def _load_mapping() -> dict:
     """Loads exercise_mapping.json once and reuses it for later calls."""
@@ -31,6 +36,25 @@ def _load_mapping() -> dict:
         with open(_MAPPING_PATH, encoding="utf-8") as f:
             _mapping = json.load(f)
     return _mapping
+
+
+def _load_catalog_names() -> set:
+    """
+    Loads the set of canonical exercise names from exercise_catalog.json once.
+
+    The catalog is a list of dicts with an 'ejercicio' key. If the file does
+    not exist (e.g. the shared project is not present), an empty set is
+    returned and no error is raised — the catalog check is best-effort.
+    """
+    global _catalog_names
+    if _catalog_names is None:
+        if _CATALOG_PATH.exists():
+            with open(_CATALOG_PATH, encoding="utf-8") as f:
+                catalog = json.load(f)
+            _catalog_names = {entry["ejercicio"] for entry in catalog}
+        else:
+            _catalog_names = set()
+    return _catalog_names
 
 
 def _save_mapping(mapping: dict) -> None:
@@ -76,27 +100,41 @@ def normalize_exercise_name(name: str) -> str:
     """
     Returns the canonical display name for a raw exercise label.
 
-    Exact matches from exercise_mapping.json take priority. When no explicit
-    mapping exists, a conservative automatic formatter is applied and the new
-    entry is written back to exercise_mapping.json with a warning printed to
-    stderr so the user can review and correct the auto-generated canonical.
+    Lookup order:
+      1. exercise_mapping.json — explicit raw→canonical mapping.
+      2. Auto-format rules (_auto_format) — applied when no mapping exists.
+
+    Side-effects for unknown/uncatalogued exercises:
+      - If the raw name is not in the mapping, the auto-formatted canonical is
+        written back to exercise_mapping.json and a warning is printed to stderr.
+      - If the resulting canonical is not in exercise_catalog.json, a separate
+        warning is printed so the user can add the exercise to the catalog with
+        its semantic attributes (pattern, vector, mechanics, etc.).
     """
     mapping = _load_mapping()
+
     if name in mapping:
-        return mapping[name]
+        canonical = mapping[name]
+    else:
+        canonical = _auto_format(name)
+        mapping[name] = canonical
+        _save_mapping(mapping)
+        print(
+            f"\n⚠️  UNMAPPED EXERCISE — added to exercise_mapping.json automatically:\n"
+            f'   "{name}" → "{canonical}"\n'
+            f"   Edit helpers/exercise_mapping.json if the canonical name is wrong.\n",
+            file=sys.stderr,
+        )
 
-    canonical = _auto_format(name)
-
-    # Persist the new entry immediately so the user can review it
-    mapping[name] = canonical
-    _save_mapping(mapping)
-
-    print(
-        f"\n⚠️  UNMAPPED EXERCISE — added to exercise_mapping.json automatically:\n"
-        f'   "{name}" → "{canonical}"\n'
-        f"   Edit helpers/exercise_mapping.json if the canonical name is wrong.\n",
-        file=sys.stderr,
-    )
+    # Warn if the canonical name is missing from the exercise catalog
+    catalog = _load_catalog_names()
+    if catalog and canonical not in catalog:
+        print(
+            f"\n⚠️  EXERCISE NOT IN CATALOG — add it to exercise_catalog.json:\n"
+            f'   "{canonical}"\n'
+            f"   File: shared/training_shared/exercise_catalog.json\n",
+            file=sys.stderr,
+        )
 
     return canonical
 
