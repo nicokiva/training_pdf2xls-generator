@@ -1,32 +1,65 @@
 """
 helpers/exercise_normalizer.py — Exercise name normalization.
 
-Loads exercise_mapping.json and maps raw PDF exercise names to their
-canonical forms. For names not in the mapping, applies automatic formatting
-rules: agarre/posición qualifiers are moved to parentheses at the end.
+Responsibilities
+----------------
+1. Map raw PDF exercise labels to their canonical names using
+   exercise_mapping.json (explicit, curated table).
+2. For labels not in the mapping, apply conservative auto-formatting rules
+   (Empuje→Press, agarre/banco/sentado qualifiers → parentheses) and
+   persist the new raw→canonical entry back to exercise_mapping.json so
+   the user can review or correct it.
+3. After resolving the canonical name, verify that it exists in
+   exercise_catalog.json (the semantic catalog used by the routine analyser).
+   If it is absent, print a one-time warning to stderr so the user knows to
+   add the exercise with its attributes (patron, vector, mecanica, etc.).
 
-When an exercise is NOT found in the mapping, the auto-formatted name is used
-AND the new entry is automatically written back to exercise_mapping.json so
-the user can review and adjust it without having to add it manually.
+Caching strategy
+----------------
+Both the mapping and the catalog are loaded lazily from disk on the first
+call and then kept in module-level variables (_mapping, _catalog_names).
+This makes repeated normalizations O(1) after the first call while avoiding
+file I/O at import time.
 
-The mapping file is loaded lazily and cached in the module-level _mapping
-variable. This keeps repeated normalizations cheap while avoiding file I/O
-at import time.
+Warning deduplication
+---------------------
+Catalog warnings are emitted at most once per canonical name per process
+run. The _warned_catalog set tracks which names have already been flagged.
+Mapping warnings are naturally deduplicated because once a name is written
+to the mapping it will be found on subsequent calls and the save path is
+never reached again.
 """
 
 import json
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
+# ── File paths ────────────────────────────────────────────────────────────────
+
+# Raw→canonical name table, auto-updated when new exercises are encountered.
 _MAPPING_PATH = Path(__file__).parent / "exercise_mapping.json"
-# Lazy in-memory cache populated by _load_mapping() on first use.
-_mapping = None
 
-# exercise_catalog.json lives in the shared/ sibling project.
-_CATALOG_PATH = Path(__file__).parent.parent.parent / "shared" / "training_shared" / "exercise_catalog.json"
-# Lazy set of canonical exercise names from the catalog.
-_catalog_names = None
+# Semantic exercise catalog (patron, vector, mecanica, estabilizacion).
+# Lives in the sibling shared/ project; path: training/shared/training_shared/
+_CATALOG_PATH = (
+    Path(__file__).parent.parent.parent
+    / "shared" / "training_shared" / "exercise_catalog.json"
+)
+
+# ── Lazy caches ───────────────────────────────────────────────────────────────
+
+# Dict loaded from exercise_mapping.json; None until first use.
+_mapping: Optional[dict] = None  # type: ignore[assignment]
+
+# Set of canonical names loaded from exercise_catalog.json;
+# None until first use; empty set when the catalog file is not found.
+_catalog_names: Optional[set] = None  # type: ignore[assignment]
+
+# Canonical names for which a catalog-missing warning has already been shown
+# this process run, to avoid flooding stderr with repeated warnings.
+_warned_catalog: set = set()
 
 
 def _load_mapping() -> dict:
