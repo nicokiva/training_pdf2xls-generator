@@ -22,7 +22,7 @@ from pathlib import Path
 import openpyxl
 
 from helpers.pdf_parser import parse_pdf
-from helpers.exercise   import make_tab_name, exercise_display_name, reorder_days
+from helpers.exercise   import make_tab_name, exercise_display_name
 from helpers.sheets     import get_sheets_service, write_to_google_sheets
 from helpers.xlsx       import write_xlsx_tab
 from helpers.events     import publish_event
@@ -69,9 +69,6 @@ def main():
 
     print(f"Parsing PDF: {pdf_path}")
     data = parse_pdf(pdf_path)
-
-    # Reorder days to match preferred muscle-group priority: Pecho → Hombros → Piernas → Espalda
-    data["days"] = reorder_days(data["days"])
 
     # Normalize exercise names using the shared mapping
     for exercises in data["days"].values():
