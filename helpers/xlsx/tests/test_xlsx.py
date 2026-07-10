@@ -76,6 +76,15 @@ class TestWriteXlsxTab:
         assert "Rep." in all_values
         assert "Peso" in all_values
 
+    def test_keeps_unprogrammed_fourth_set_empty(self):
+        from helpers.xlsx import write_xlsx_tab
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = write_xlsx_tab(wb, "19/05/26-...", _make_days_data())
+        # Row 4 = first exercise. H=week1 set4 reps, I=week1 set4 peso.
+        assert ws["H4"].value in ("", None)
+        assert ws["I4"].value in ("", None)
+
     def test_matches_google_sheet_layout(self):
         from helpers.xlsx import write_xlsx_tab
         import openpyxl

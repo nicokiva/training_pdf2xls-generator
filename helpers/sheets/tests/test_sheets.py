@@ -88,6 +88,14 @@ class TestBuildSheetValues:
         all_values = [cell for row in result for cell in row]
         assert "Sentadilla" in all_values
 
+    def test_leaves_unprogrammed_set_cells_empty(self):
+        from helpers.sheets import build_sheet_values
+        result = build_sheet_values(self._make_days_data())
+        ex_row = result[3]  # Dia row, series row, labels row, then first exercise
+        assert ex_row[1] == 10  # W1 S1 reps
+        assert ex_row[7] == ""  # W1 S4 reps (not programmed in [10,10,8])
+        assert ex_row[8] == ""  # W1 S4 peso
+
 
 # ---------------------------------------------------------------------------
 # build_sheet_values — comb exercises
