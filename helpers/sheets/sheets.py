@@ -91,7 +91,7 @@ def rename_tab(service, spreadsheet_id, old_name, new_name):
     print(f"  Renamed tab: '{old_name}' → '{new_name}'")
 
 
-def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks=4, n_series=3):
+def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks=4, n_series=4):
     """
     Applies all visual formatting to the tab: borders, background colors, merged cells,
     column widths and frozen column.
@@ -123,11 +123,11 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
         {"red": 1.0,  "green": 0.94, "blue": 0.93},  # week 4: very soft salmon
     ]
 
-    # Total columns: 1 (name) + 4 weeks × 3 sets × 2 (Rep+Peso) = 25
-    # Col Z (index 25) is the suggested rest time column ("Pausa")
+    # Total columns: 1 (name) + 4 weeks × 4 sets × 2 (Rep+Peso) = 33
+    # Pausa is the trailing rest-time column after the data block.
     n_data_cols = n_weeks * n_series * 2
-    total_cols  = 1 + n_data_cols   # = 25, used as the start index of col Z
-    pausa_col   = total_cols        # = 25 (col Z, 0-based)
+    total_cols  = 1 + n_data_cols   # = 33, used as the start index of Pausa
+    pausa_col   = total_cols        # = 33 (0-based)
 
     def rng(r0, r1, c0, c1):
         """Shortcut to build a cell range (rows r0..r1, columns c0..c1)."""
@@ -156,11 +156,11 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
         # Fix width of data columns (B onwards) to 45px
         {"updateDimensionProperties": {
             "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
-                      "startIndex": 1, "endIndex": 25},
+                      "startIndex": 1, "endIndex": 33},
             "properties": {"pixelSize": 45},
             "fields": "pixelSize",
         }},
-        # Col Z (Pausa): wider to fit rest-time text
+        # Pausa: wider to fit rest-time text
         {"updateDimensionProperties": {
             "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
                       "startIndex": pausa_col, "endIndex": pausa_col + 1},
@@ -191,7 +191,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
             }},
             "fields": "userEnteredFormat(textFormat,borders)",
         }})
-        # Cells B:Z merged + thick borders (includes pausa column)
+        # Cells B:Pausa merged + thick borders (includes pausa column)
         requests.append({"mergeCells": {
             "range": rng(dia_row, dia_row+1, 1, pausa_col+1), "mergeType": "MERGE_ALL"
         }})
@@ -259,7 +259,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                 }})
                 col += 2
 
-        # ── Col Z "Pausa" header (spans series+label rows, same height as col A) ──
+        # ── Pausa header (spans series+label rows, same height as col A) ──
         requests.append({"mergeCells": {
             "range": rng(series_row, label_row+1, pausa_col, pausa_col+1),
             "mergeType": "MERGE_ALL",
@@ -370,7 +370,7 @@ def apply_sheet_formatting(service, spreadsheet_id, sheet_id, days_data, n_weeks
                     }})
                     col += 2
 
-        # ── Col Z: Pausa cells ─────────────────────────────────────────────────
+        # ── Pausa cells ──────────────────────────────────────────────────────
         # Individual exercises: one cell per row.
         # Combined groups: merge all Z cells in the same comb_group into one,
         # because the suggested rest applies after the full combined block, not
@@ -458,17 +458,17 @@ def build_sheet_values(days_data):
         # Set numbers row
         series_row = [""]
         for _week in range(4):
-            for s in range(1, 4):
+            for s in range(1, 5):
                 series_row.extend([s, ""])
-        series_row.append("Pausa")   # col Z header
+        series_row.append("Pausa")
         all_rows.append(series_row)
 
         # Labels row
         label_row = [""]
         for _week in range(4):
-            for _s in range(3):
+            for _s in range(4):
                 label_row.extend(["Rep.", "Peso"])
-        label_row.append("")         # col Z (merged with series row above)
+        label_row.append("")
         all_rows.append(label_row)
 
         # Exercise rows
@@ -479,11 +479,11 @@ def build_sheet_values(days_data):
             ex_row = [("[C] " if row_type == "comb" else "") + exercise_display_name(ex)]
             week_reps = ex.get("week_reps", [None, None, None, None])
             for week_idx in range(4):
-                reps = week_reps[week_idx] if week_reps[week_idx] is not None else [None, None, None]
-                for s in range(3):
+                reps = week_reps[week_idx] if week_reps[week_idx] is not None else [None, None, None, None]
+                for s in range(4):
                     ex_row.append(reps[s] if s < len(reps) else "")
                     ex_row.append("")   # Peso column (filled in manually)
-            ex_row.append("")            # col Z: Pausa (filled by writer with suggested rest)
+            ex_row.append("")            # Pausa (filled by writer with suggested rest)
             all_rows.append(ex_row)
 
         # Two blank rows between days

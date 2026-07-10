@@ -50,7 +50,7 @@ Install with:
 pip install -r requirements.txt
 ```
 
-This includes `training-shared` (shared event constants), installed directly from GitHub.
+This includes `training-shared` (shared event constants), installed directly from GitHub, and `openpyxl` for the local `.xlsx` export.
 
 ## How to get Google Sheets credentials
 

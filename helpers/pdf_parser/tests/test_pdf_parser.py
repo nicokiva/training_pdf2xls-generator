@@ -6,7 +6,7 @@ parse_pdf requires a real PDF and is exercised through integration, not unit tes
 """
 import pytest
 from helpers.pdf_parser import group_lines, line_text, is_exercise_number
-from helpers.pdf_parser.pdf_parser import parse_column
+from helpers.pdf_parser.pdf_parser import parse_column, parse_pdf
 
 
 def _word(text, x0, top):
@@ -22,7 +22,7 @@ def _ex_words(number, name, top, x0=60, reps=(10, 9, 8, 7)):
     """
     Build the minimal set of words needed for ONE left-column exercise entry.
 
-    Produces: number word, name word, 'repeticiones' + 3 rep values,
+    Produces: number word, name word, 'repeticiones' + 4 rep values,
     and 2da/3ra/4ta progression lines.
     The x0 defaults (60 for number, 100 for name) fall inside
     LEFT_EX_NUM_X_RANGE (55-80).
@@ -35,6 +35,7 @@ def _ex_words(number, name, top, x0=60, reps=(10, 9, 8, 7)):
         {"text": str(reps[0]),   "x0": x0 + 70,  "top": top + 20},
         {"text": str(reps[0]),   "x0": x0 + 90,  "top": top + 20},
         {"text": str(reps[0]),   "x0": x0 + 110, "top": top + 20},
+        {"text": str(reps[0]),   "x0": x0 + 130, "top": top + 20},
         # Week 2-4 progressions
         {"text": "2da", "x0": x0,      "top": top + 40},
         {"text": str(reps[1]), "x0": x0 + 40, "top": top + 40},
@@ -222,6 +223,20 @@ class TestParseColumn:
         _, combs = parse_column(self._two_exercise_comb(), 0, 290, "left", 0)
         assert len(combs) == 1
 
+    def test_comb_block_of_three_produces_one_group(self):
+        words = (
+            _comb_header(3, top=240)
+            + _ex_words(1, "A", top=260)
+            + _ex_words(2, "B", top=360)
+            + _ex_words(3, "C", top=460)
+        )
+        exs, combs = parse_column(words, 0, 290, "left", 0)
+        assert len(combs) == 1
+        assert combs[0][1] == 3
+        assert exs[0]["is_comb"] is True
+        assert exs[1]["is_comb"] is True
+        assert exs[2]["is_comb"] is True
+
     def test_comb_groups_entry_is_object_reference_not_number(self):
         """comb_groups must store a reference to the exercise dict, not its number."""
         exs, combs = parse_column(self._two_exercise_comb(), 0, 290, "left", 0)
@@ -271,6 +286,49 @@ class TestParseColumn:
         assert exs[1]["is_comb"] is True
         assert exs[2]["is_comb"] is False
 
+    def test_progression_remainder_is_not_saved_as_comment(self):
+        words = [
+            {"text": "1", "x0": 60, "top": 250},
+            {"text": "Press de pecho", "x0": 100, "top": 250},
+            {"text": "repeticiones", "x0": 60, "top": 270},
+            {"text": "6", "x0": 130, "top": 270},
+            {"text": "6", "x0": 150, "top": 270},
+            {"text": "6", "x0": 170, "top": 270},
+            {"text": "2da", "x0": 60, "top": 290},
+            {"text": "6", "x0": 100, "top": 290},
+            {"text": "/6/8/10", "x0": 140, "top": 290},
+        ]
+        exs, _ = parse_column(words, 0, 290, "left", 0)
+        assert exs[0]["name"] == "Press de pecho"
+        assert "comment" not in exs[0]
+
+    def test_progression_igual_and_slash_scheme(self):
+        words = [
+            {"text": "1", "x0": 60, "top": 250},
+            {"text": "Press de pecho", "x0": 100, "top": 250},
+            {"text": "repeticiones", "x0": 60, "top": 270},
+            {"text": "6", "x0": 130, "top": 270},
+            {"text": "8", "x0": 150, "top": 270},
+            {"text": "10", "x0": 170, "top": 270},
+            {"text": "12", "x0": 190, "top": 270},
+            {"text": "2da", "x0": 60, "top": 290},
+            {"text": "igual", "x0": 100, "top": 290},
+            {"text": "3ra", "x0": 60, "top": 310},
+            {"text": "4/6/8/10", "x0": 100, "top": 310},
+            {"text": "con", "x0": 180, "top": 310},
+            {"text": "mas", "x0": 210, "top": 310},
+            {"text": "peso", "x0": 235, "top": 310},
+            {"text": "4ta", "x0": 60, "top": 330},
+            {"text": "igual", "x0": 100, "top": 330},
+        ]
+        exs, _ = parse_column(words, 0, 290, "left", 0)
+        ex = exs[0]
+        assert ex["week_reps"][0] == [6, 8, 10, 12]
+        assert ex["week_reps"][1] == [6, 8, 10, 12]
+        assert ex["week_reps"][2] == [4, 6, 8, 10]
+        assert ex["week_reps"][3] == [4, 6, 8, 10]
+        assert "comment" not in ex
+
     # ── Header filtering ─────────────────────────────────────────────────
 
     def test_words_above_header_are_ignored(self):
@@ -284,3 +342,66 @@ class TestParseColumn:
         words = _ex_words(1, "Visible", top=250)
         exs, _ = parse_column(words, 0, 290, "left", header_bottom_y=200)
         assert len(exs) == 1
+
+
+class TestParsePdfCombAcrossColumns:
+    def test_comb_header_marks_both_columns(self, monkeypatch, tmp_path):
+        class FakePage:
+            def __init__(self, words, text):
+                self._words = words
+                self._text = text
+            def extract_words(self):
+                return list(self._words)
+            def extract_text(self):
+                return self._text
+
+        class FakePdf:
+            def __init__(self, pages):
+                self.pages = pages
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        words = [
+            {"text": "1", "x0": 294, "top": 218},
+            {"text": "Comb", "x0": 8, "top": 241},
+            {"text": "x2", "x0": 45, "top": 241},
+            {"text": "1", "x0": 63.9, "top": 260.5},
+            {"text": "Press", "x0": 101, "top": 260.5},
+            {"text": "de", "x0": 140, "top": 260.5},
+            {"text": "pecho", "x0": 155, "top": 260.5},
+            {"text": "2", "x0": 355.4, "top": 260.5},
+            {"text": "Biceps", "x0": 373, "top": 260.5},
+            {"text": "con", "x0": 420, "top": 260.5},
+            {"text": "mancuernas", "x0": 450, "top": 260.5},
+            {"text": "Series", "x0": 60.7, "top": 277.5},
+            {"text": "1", "x0": 207.7, "top": 277.5},
+            {"text": "2", "x0": 241.5, "top": 277.5},
+            {"text": "3", "x0": 275.3, "top": 277.5},
+            {"text": "Series", "x0": 352.2, "top": 277.5},
+            {"text": "1", "x0": 499.2, "top": 277.5},
+            {"text": "2", "x0": 533.0, "top": 277.5},
+            {"text": "3", "x0": 566.8, "top": 277.5},
+            {"text": "repeticiones", "x0": 60.7, "top": 294.5},
+            {"text": "6", "x0": 204.4, "top": 294.5},
+            {"text": "6", "x0": 238.3, "top": 294.5},
+            {"text": "6", "x0": 272.1, "top": 294.5},
+            {"text": "repeticiones", "x0": 352.2, "top": 294.5},
+            {"text": "6", "x0": 495.9, "top": 294.5},
+            {"text": "6", "x0": 529.8, "top": 294.5},
+            {"text": "6", "x0": 563.6, "top": 294.5},
+            {"text": "2da", "x0": 10, "top": 324.5},
+            {"text": "igual", "x0": 40, "top": 324.5},
+            {"text": "2da", "x0": 301.5, "top": 324.5},
+            {"text": "igual", "x0": 331.5, "top": 324.5},
+        ]
+
+        fake_pdf = FakePdf([FakePage(words, "Vigencia: 01/01/2026 - 01/02/2026")])
+        monkeypatch.setattr("helpers.pdf_parser.pdf_parser.pdfplumber.open", lambda _: fake_pdf)
+
+        result = parse_pdf("fake.pdf")
+        day = result["days"][1]
+        assert day[0]["is_comb"] is True
+        assert day[1]["is_comb"] is True
+        assert day[0]["comb_group"] == day[1]["comb_group"]

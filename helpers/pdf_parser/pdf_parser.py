@@ -9,6 +9,7 @@ Responsibilities:
 
 import re
 import pdfplumber
+from typing import List, Optional
 
 
 # ── PDF position constants ────────────────────────────────────────────────────
@@ -65,6 +66,38 @@ def group_lines(words, y_tolerance=4):
 def line_text(line):
     """Returns the human-readable text for one grouped PDF line."""
     return " ".join(w["text"] for w in line)
+
+
+def _looks_like_progression_comment(comment: str) -> bool:
+    """
+    Returns True when a trailing fragment is just a rep progression token
+    like '/6/8/10' and should not be stored as an exercise comment.
+    """
+    return bool(re.fullmatch(r"/[\d./\s]+", comment.strip()))
+
+
+def _parse_progression_reps(fragment: str, fallback_len: int) -> Optional[List[int]]:
+    """
+    Parses a weekly progression fragment into a list of reps.
+
+    Supports:
+      - "igual" / "igual 1" / "igual 3"  → copy the referenced week later
+      - "8"                               → [8, 8, 8, ...]
+      - "4/6/8/10" or "4 6 8 10"          → explicit series progression
+    """
+    fragment = fragment.strip()
+    if not fragment or fragment.startswith("igual"):
+        return None
+    parts = [p for p in re.split(r"[/\s]+", fragment) if p]
+    if not parts:
+        return None
+    try:
+        reps = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(reps) == 1:
+        return reps * max(1, fallback_len)
+    return reps
 
 
 def is_exercise_number(word, col):
@@ -155,31 +188,42 @@ def parse_column(all_words, x_min, x_max, col_side, header_bottom_y=HEADER_BOTTO
             current_comb_start = None
             continue
 
-        # Detect "repeticiones X X X" → week 1 repetitions (3 sets)
-        m = re.match(r"^repeticiones\s+(\d+)\s+(\d+)\s+(\d+)", txt)
+        # Detect "repeticiones X X X X" → week 1 repetitions (3 or 4 sets)
+        m = re.match(r"^repeticiones\s+((?:\d+\s+)*\d+)", txt)
         if m and current_ex is not None:
-            week_reps[0] = [int(m.group(1)), int(m.group(2)), int(m.group(3))]
+            week_reps[0] = [int(v) for v in m.group(1).split()]
             continue
 
-        # Detect weekly progression: "2da X", "3ra X", "4ta X"
-        # Use re.search (not re.match) to find the pattern anywhere in the line,
-        # capturing lines like "HANDS BEHIND NECK 2da 6" or "2da 8 EACH LEG"
-        m2 = re.search(r"(2da|3ra|4ta)\s+(\d+)", txt)
-        if m2 and current_ex is not None:
-            week_idx = {"2da": 1, "3ra": 2, "4ta": 3}[m2.group(1)]
-            rep = int(m2.group(2))
-            if week_reps[0] is not None:
-                week_reps[week_idx] = [rep, rep, rep]   # same reps for all 3 sets
+        # Detect weekly progression lines such as:
+        #   "2da igual"
+        #   "3ra 4/6/8/10 con mas peso"
+        #   "4ta 8"
+        m_prog = re.search(r"(2da|3ra|4ta|segunda|tercera|cuarta)\s+(.+)$", txt)
+        if m_prog and current_ex is not None:
+            token = m_prog.group(1).lower()
+            week_idx = {
+                "2da": 1, "segunda": 1,
+                "3ra": 2, "tercera": 2,
+                "4ta": 3, "cuarta": 3,
+            }[token]
 
-            # Extract comment: text before or after the "2da X" token
-            before = txt[:m2.start()].strip()
-            after  = txt[m2.end():].strip()
-            # Ignore load suggestions like "con mas peso"
-            after = re.sub(r"con\s+mas\s+peso.*", "", after, flags=re.IGNORECASE).strip()
-            comment = (before or after).strip()
-            if comment and not re.match(r"^[\d\s]+$", comment):
-                # setdefault: only saves if there is NOT already a comment (doesn't overwrite)
-                current_ex.setdefault("comment", comment)
+            remainder = re.sub(r"con\s+mas\s+peso.*", "", m_prog.group(2), flags=re.IGNORECASE).strip()
+            reps = _parse_progression_reps(remainder, len(week_reps[0]) if week_reps[0] is not None else 4)
+            if reps is not None:
+                week_reps[week_idx] = reps
+            else:
+                ref_match = re.search(r"igual\s+(\d+)", remainder)
+                if ref_match:
+                    ref_idx = int(ref_match.group(1)) - 1
+                else:
+                    ref_idx = week_idx - 1
+                if 0 <= ref_idx < len(week_reps) and week_reps[ref_idx] is not None:
+                    week_reps[week_idx] = list(week_reps[ref_idx])
+
+                comment = remainder.strip()
+                if comment and comment != "igual" and not comment.startswith("igual ") and not _looks_like_progression_comment(comment):
+                    # setdefault: only saves if there is NOT already a comment (doesn't overwrite)
+                    current_ex.setdefault("comment", comment)
             continue
 
         # Check if any word in this line is an exercise number.
@@ -309,11 +353,10 @@ def parse_pdf(pdf_path):
             left_ex,  left_comb_groups  = parse_column(words, 0, COL_SPLIT_X, "left",  effective_header_bottom)
             right_ex, right_comb_groups = parse_column(words, COL_SPLIT_X, 9999, "right", effective_header_bottom)
 
-            # Merge both columns sorted by page position (top-to-bottom, left-to-right).
-            # Sorting by (top, x0) preserves the visual page order, which is critical
-            # for correctly identifying combined pairs when the right column restarts
-            # exercise numbering (e.g. right-col #1 pairs with left-col #9).
-            all_ex = sorted(left_ex + right_ex, key=lambda e: (e.get("top", 0), e.get("x0", 0)))
+            # Merge both columns ordered by the exercise number from the PDF.
+            # The routine numbering is the logical order; keep it stable so comb
+            # blocks that span columns reassemble correctly.
+            all_ex = sorted(left_ex + right_ex, key=lambda e: (e.get("number", 0), e.get("top", 0), e.get("x0", 0)))
 
             # Re-apply Comb membership globally.
             # Problem: parse_column marks combos within its own column.

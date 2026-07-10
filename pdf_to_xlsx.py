@@ -2,7 +2,8 @@
 """
 pdf_to_xlsx.py — Script entry point.
 
-Reads a training routine PDF and writes the data to Google Sheets.
+Reads a training routine PDF and writes the data to Google Sheets and a local
+.xlsx file.
 
 Usage:
     python3 pdf_to_xlsx.py <pdf.pdf> --sheets-id XXXX --credentials creds.json [--force]
@@ -16,10 +17,12 @@ Project structure:
 """
 
 import sys
+from pathlib import Path
 
 from helpers.pdf_parser import parse_pdf
 from helpers.exercise   import make_tab_name, exercise_display_name
 from helpers.sheets     import get_sheets_service, write_to_google_sheets
+from helpers.xlsx       import write_xlsx_tab
 from helpers.events     import publish_event
 from training_shared.events import EventType
 from helpers.exercise_normalizer import normalize_exercises
@@ -47,6 +50,11 @@ def main():
         action="store_true",
         help="Delete and recreate the tab if it already exists",
     )
+    parser.add_argument(
+        "--no-xlsx",
+        action="store_true",
+        help="Skip writing the local .xlsx file",
+    )
     args = parser.parse_args()
 
     print(f"Parsing PDF: {args.pdf}")
@@ -65,6 +73,15 @@ def main():
 
     tab_name = make_tab_name(data["vigencia_start"], data["vigencia_end"])
     print(f"\nTab name: {tab_name}")
+
+    if not args.no_xlsx:
+        import openpyxl
+
+        out_path = Path(args.pdf).with_suffix(".xlsx")
+        wb = openpyxl.Workbook()
+        write_xlsx_tab(wb, tab_name, data["days"])
+        wb.save(out_path)
+        print(f"\nSaved local .xlsx file: {out_path}")
 
     if not args.sheets_id:
         print("\nTip: use --sheets-id and --credentials to sync to Google Sheets.")

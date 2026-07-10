@@ -17,6 +17,7 @@ FAKE_MAPPING = {
     "Peso muerto con mancuernas":         "Peso muerto con mancuernas",
     "Tirón dorsal en polea agarre prono": "Tirón dorsal en polea (agarre prono)",
     "Abdominales bolita a dos piernas":   "Abdominal bolita a dos piernas",
+    "Biceps con mancuernas":              "Bíceps con mancuernas",
 }
 
 # Canonical names that exist in the fake catalog
@@ -57,6 +58,14 @@ class TestNormalizeExerciseNameMapping:
         # even if the raw name would match a formatting rule.
         result = normalize_exercise_name("Abdominales bolita a dos piernas")
         assert result == "Abdominal bolita a dos piernas"
+
+    def test_real_pdf_synonym_maps_to_canonical(self):
+        result = normalize_exercise_name("Empuje de pecho en Hammer")
+        assert result == "Press de pecho en Hammer"
+
+    def test_real_pdf_accentless_synonym_maps_to_canonical(self):
+        result = normalize_exercise_name("Biceps con mancuernas")
+        assert result == "Bíceps con mancuernas"
 
 
 # ---------------------------------------------------------------------------

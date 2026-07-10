@@ -75,3 +75,21 @@ class TestWriteXlsxTab:
                     all_values.append(v)
         assert "Rep." in all_values
         assert "Peso" in all_values
+
+    def test_matches_google_sheet_layout(self):
+        from helpers.xlsx import write_xlsx_tab
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = write_xlsx_tab(
+            wb,
+            "19/05/26-...",
+            {
+                1: [
+                    {"name": "Abdominal", "is_comb": True, "comb_group": 0, "week_reps": [[10, 10, 10], None, None, None]},
+                ]
+            },
+        )
+
+        assert ws.cell(row=2, column=34).value == "Pausa"
+        assert ws.cell(row=4, column=1).value == "[C] Abdominal"
